@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <defs>
+    <!-- Dome Gradient (Lime-Green to Deep Emerald) -->
+    <linearGradient id="domeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#84cc16" />
+      <stop offset="50%" stop-color="#22c55e" />
+      <stop offset="100%" stop-color="#15803d" />
+    </linearGradient>
+
+    <!-- Dome Left Shade -->
+    <linearGradient id="domeLeftGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#166534" />
+      <stop offset="60%" stop-color="#22c55e" />
+      <stop offset="100%" stop-color="#86efac" />
+    </linearGradient>
+
+    <!-- Dome Inner Arch -->
+    <linearGradient id="innerArchGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#f8fafc" />
+    </linearGradient>
+
+    <!-- Book Left Pages Gradient -->
+    <linearGradient id="bookLeftGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0284c7" />
+      <stop offset="60%" stop-color="#1e40af" />
+      <stop offset="100%" stop-color="#172554" />
+    </linearGradient>
+
+    <!-- Book Right Pages Gradient -->
+    <linearGradient id="bookRightGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="50%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#1e3a8a" />
+    </linearGradient>
+
+    <!-- Star & Crescent Gradient -->
+    <linearGradient id="crescentGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4ade80" />
+      <stop offset="100%" stop-color="#16a34a" />
+    </linearGradient>
+
+    <!-- Arc Gradient -->
+    <linearGradient id="arcGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#0284c7" stop-opacity="0" />
+      <stop offset="30%" stop-color="#0ea5e9" />
+      <stop offset="70%" stop-color="#2563eb" />
+      <stop offset="100%" stop-color="#1d4ed8" stop-opacity="0" />
+    </linearGradient>
+  </defs>
+
+  <!-- 1. Top Crescent Moon and Star -->
+  <g transform="translate(250, 75)">
+    <!-- Crescent Moon -->
+    <path d="M 0,-34 A 26,26 0 1,0 22,12 A 20,20 0 1,1 0,-34 Z" fill="url(#crescentGrad)" />
+    <!-- Blue 5-Pointed Star Inside Crescent -->
+    <polygon points="3,-18 7,-9 17,-9 9,-3 12,6 3,0 -6,6 -3,-3 -11,-9 -1,-9" fill="#0284c7" />
+  </g>
+
+  <!-- Spire Pin -->
+  <path d="M 248,100 L 252,100 L 252,118 L 248,118 Z" fill="#16a34a" />
+
+  <!-- 2. Mosque Dome -->
+  <g>
+    <!-- Outer Dome Silhouette -->
+    <path d="M 250,118 C 248,150 160,195 140,248 C 145,252 230,252 250,252 C 270,252 355,252 360,248 C 340,195 252,150 250,118 Z" fill="url(#domeGrad)" />
+
+    <!-- Left Shade of Dome -->
+    <path d="M 250,118 C 248,150 160,195 140,248 C 180,248 245,248 250,248 Z" fill="url(#domeLeftGrad)" opacity="0.85" />
+
+    <!-- Inner Arch Negative Space -->
+    <path d="M 250,140 C 248,168 185,205 170,246 C 205,246 295,246 330,246 C 315,205 252,168 250,140 Z" fill="#ffffff" />
+  </g>
+
+  <!-- 3. Open Book / Quran Structure (Layered) -->
+  <!-- Top Layer / Book Spine Curve -->
+  <path d="M 134,256 C 180,270 238,284 250,296 C 262,284 320,270 366,256 C 374,264 366,274 360,282 C 315,296 260,308 250,320 C 240,308 185,296 140,282 C 134,274 126,264 134,256 Z" fill="#1d4ed8" />
+
+  <!-- Main Left Page Open Wings -->
+  <path d="M 136,268 C 180,280 236,294 250,308 L 250,378 C 235,358 175,340 138,340 C 130,315 132,290 136,268 Z" fill="url(#bookLeftGrad)" />
+
+  <!-- Main Right Page Open Wings -->
+  <path d="M 364,268 C 320,280 264,294 250,308 L 250,378 C 265,358 325,340 362,340 C 370,315 368,290 364,268 Z" fill="url(#bookRightGrad)" />
+
+  <!-- Inner Page Folds / Highlights -->
+  <path d="M 148,278 C 185,290 235,302 248,314 L 248,364 C 235,350 185,335 150,335 Z" fill="#38bdf8" opacity="0.6" />
+  <path d="M 352,278 C 315,290 265,302 252,314 L 252,364 C 265,350 315,335 350,335 Z" fill="#60a5fa" opacity="0.6" />
+
+  <!-- Bottom Core V of Book -->
+  <path d="M 235,370 L 250,388 L 265,370 C 255,364 245,364 235,370 Z" fill="#1e3a8a" />
+
+  <!-- 4. Lower Horizon Arc -->
+  <path d="M 120,418 C 180,388 320,388 380,418 C 315,394 185,394 120,418 Z" fill="url(#arcGrad)" />
+
+  <!-- 5. Typography -->
+  <!-- "SMP & SMA IT AR RAHMAH CENDEKIA" -->
+  <text x="250" y="445" font-family="'Plus Jakarta Sans', 'Segoe UI', Arial, sans-serif" font-size="19" font-weight="900" fill="#0f172a" text-anchor="middle" letter-spacing="0.8">
+    SMP &amp; SMA IT AR RAHMAH CENDEKIA
+  </text>
+
+  <!-- "KOTA TANGERANG" -->
+  <text x="250" y="475" font-family="'Georgia', 'Times New Roman', serif" font-size="18" font-weight="600" fill="#1e293b" text-anchor="middle" letter-spacing="3.5">
+    KOTA TANGERANG
+  </text>
+</svg>

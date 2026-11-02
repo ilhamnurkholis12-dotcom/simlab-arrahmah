@@ -1,0 +1,8 @@
+{
+  "name": "SIMLAB IPA SMP \u0026 SMA IT Ar-Rahmah Cendekia 2026",
+  "description": "Sistem Rekapitulasi Stok Barang Inventaris Laboratorium IPA SMP \u0026 SMA IT Ar-Rahmah Cendekia Tahun 2026 dengan sinkronisasi Fisika, Kimia, Biologi, dan IPA Terpadu SMP.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
