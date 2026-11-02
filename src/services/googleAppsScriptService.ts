@@ -25,9 +25,11 @@ export const DEFAULT_GAS_API_URL =
 export type GasSheetName =
   | 'Stok_Alat'
   | 'Bahan_Kimia'
+  | 'Peminjaman_Alat'
   | 'Jurnal_Praktikum'
   | 'Data_Siswa'
   | 'E_Rapot'
+  | 'E_Raport'
   | 'Pengguna';
 
 export interface GasApiResponse<T = any> {
@@ -746,6 +748,36 @@ export const fetchAllGasData = async (
         pengguna: 0,
       },
       message: err.message || 'Gagal membaca data dari Google Apps Script.',
+    };
+  }
+};
+
+/**
+ * Trigger remote auto-setup of all tables and initial dummy data on Google Sheets
+ */
+export const triggerGasDatabaseSetup = async (
+  apiUrl: string = getGasApiUrl()
+): Promise<{ success: boolean; message: string; details?: any }> => {
+  try {
+    const res = await fetch(`${apiUrl}?action=setupDatabase`, {
+      method: 'GET',
+    });
+    if (!res.ok) {
+      return {
+        success: false,
+        message: `HTTP ${res.status}: Gagal memicu setup database.`,
+      };
+    }
+    const json = await res.json();
+    return {
+      success: json.status === 'success',
+      message: json.message || 'Setup database selesai.',
+      details: json.details,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal memicu setup database: ${err.message || 'Kesalahan jaringan'}`,
     };
   }
 };
