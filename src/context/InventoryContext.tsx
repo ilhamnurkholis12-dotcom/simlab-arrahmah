@@ -54,14 +54,22 @@ import {
 import { matchId } from '../utils/helpers';
 import {
   syncItemToGas,
+  syncUpdateItemInGas,
+  syncDeleteItemFromGas,
   syncActivityToGas,
+  syncDeleteActivityFromGas,
   syncUserToGas,
+  syncDeleteUserFromGas,
   syncStudentToGas,
+  syncDeleteStudentFromGas,
   syncLoanToGas,
+  syncDeleteLoanFromGas,
+  syncTransactionToGas,
   syncBannerToGas,
   fetchAllGasData,
   fetchSheetData,
   mapGasRowToUser,
+  invalidateGasCache,
   GasSyncStatus,
 } from '../services/googleAppsScriptService';
 import {
@@ -258,7 +266,7 @@ interface InventoryContextType {
 
   // Real-Time Google Apps Script Database Sync
   gasSyncStatus: GasSyncStatus;
-  syncWithGoogleSheets: (isSilent?: boolean) => Promise<void>;
+  syncWithGoogleSheets: (isSilent?: boolean, forceRefresh?: boolean) => Promise<void>;
   loginAsync: (email: string, password?: string) => Promise<{ success: boolean; message: string }>;
 }
 
@@ -672,12 +680,12 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     },
   });
 
-  // Sinkronisasi data real-time dengan Google Apps Script (GET semua sheet & hydrate state)
+  // Sinkronisasi data real-time dengan Google Apps Script (GET semua sheet & hydrate state dengan Memory Cache)
   const syncWithGoogleSheets = useCallback(
-    async (isSilent = false) => {
+    async (isSilent = false, forceRefresh = false) => {
       setGasSyncStatus((prev) => ({ ...prev, isSyncing: true, errorMessage: null }));
       try {
-        const res = await fetchAllGasData();
+        const res = await fetchAllGasData(undefined, forceRefresh);
         if (res.success) {
           // 1. Hydrate Stok_Alat & Bahan_Kimia
           if (res.items.length > 0) {
@@ -1032,6 +1040,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         console.error('Gagal menyimpan pembaruan lab activities ke localStorage:', err);
       }
 
+      // Optimistic background sync: Update di Google Sheets (Jurnal_Praktikum)
+      syncActivityToGas(updatedRecord);
+
       const successMsg = 'Jurnal praktikum guru dan berita acara berhasil diperbarui.';
       showToast({
         type: 'success',
@@ -1088,6 +1099,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       } catch (err) {
         console.error('Gagal menyimpan penghapusan lab activity ke localStorage:', err);
       }
+
+      // Optimistic background sync: Hapus dari sheet Jurnal_Praktikum di Google Sheets
+      syncDeleteActivityFromGas(id);
 
       showToast({
         type: 'info',
@@ -1431,6 +1445,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         localStorage.setItem(STORAGE_KEY_LAB_ACTIVITIES, JSON.stringify(nextActivities));
       } catch {}
     }
+
+    // Optimistic background sync: Hapus dari sheet Data_Siswa di Google Sheets
+    syncDeleteStudentFromGas(id);
 
     showToast({
       type: 'success',
@@ -1939,6 +1956,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           if (currentUser?.id === id) {
             setCurrentUser(updated);
           }
+          // Optimistic background sync: Simpan pembaruan akun ke sheet Pengguna
+          syncUserToGas(updated);
           return updated;
         }
         return acc;
@@ -2131,6 +2150,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       localStorage.setItem(STORAGE_KEY_LOANS, JSON.stringify(nextLoans));
     } catch (err) {
       console.error('Gagal menyimpan pembaruan peminjaman ke localStorage:', err);
+    }
+
+    // Optimistic background sync: Hapus dari sheet Peminjaman
+    if (targetLoan) {
+      syncDeleteLoanFromGas(targetLoan.code || targetLoan.id);
     }
 
     const itemLabel = targetLoan
@@ -2433,6 +2457,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     setAccounts((prev) => prev.filter((a) => a.id !== id));
+
+    // Optimistic background sync: Hapus dari sheet Pengguna di Google Sheets
+    syncDeleteUserFromGas(target.id);
+
     return {
       success: true,
       message: `Akun ${target.name} (${target.email}) berhasil dihapus permanen dari sistem.`,
@@ -2642,7 +2670,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     syncItemToGas(newItem);
   };
 
-  // Update Item
+  // Update Item (Optimistic UI Update + Background Fast Batch GAS Sync)
   const updateItem = (id: string, updates: Partial<InventoryItem>) => {
     setItems((prev) =>
       prev.map((item) => {
@@ -2659,16 +2687,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             (updates.distribution.SMP_TERPADU || 0);
         }
 
-        // Real-time synchronization to Google Sheets (Stok_Alat / Bahan_Kimia)
-        syncItemToGas(updated);
+        // Real-time optimistic synchronization to Google Sheets (Stok_Alat / Bahan_Kimia)
+        syncUpdateItemInGas(updated);
 
         return updated;
       })
     );
   };
 
-  // Delete Item
+  // Delete Item (Optimistic UI Update + Background GAS Delete Sync)
   const deleteItem = (id: string) => {
+    const targetItem = items.find((item) => item.id === id);
     const remaining = items.filter((item) => item.id !== id);
     setItems(remaining);
     try {
@@ -2676,9 +2705,14 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } catch (err) {
       console.error('Gagal menyimpan pembaruan items ke localStorage:', err);
     }
+
+    if (targetItem) {
+      const isChem = targetItem.category === 'Bahan Kimia & Reagen';
+      syncDeleteItemFromGas(targetItem.code || targetItem.id, isChem);
+    }
   };
 
-  // Batch Delete Items (Admin / Kepala Lab Only)
+  // Batch Delete Items (Admin / Kepala Lab Only - Optimistic UI + Background GAS Delete Sync)
   const batchDeleteItems = (ids: string[]): { success: boolean; count: number; message: string } => {
     if (!isAdmin) {
       const errMsg = 'Akses Ditolak: Aksi hapus massal data inventaris hanya dapat dilakukan oleh Admin (Kepala Lab).';
@@ -2690,14 +2724,20 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     const idSet = new Set(ids);
-    const beforeCount = items.length;
+    const deletedItems = items.filter((item) => idSet.has(item.id));
     const remaining = items.filter((item) => !idSet.has(item.id));
-    const deletedCount = beforeCount - remaining.length;
+    const deletedCount = deletedItems.length;
 
     setItems(remaining);
     try {
       localStorage.setItem(STORAGE_KEY_ITEMS, JSON.stringify(remaining));
     } catch {}
+
+    // Asynchronous background deletion from Google Sheets
+    deletedItems.forEach((it) => {
+      const isChem = it.category === 'Bahan Kimia & Reagen';
+      syncDeleteItemFromGas(it.code || it.id, isChem);
+    });
 
     const successMsg = `Berhasil menghapus ${deletedCount} barang dari inventaris secara massal.`;
     showToast({
@@ -2882,6 +2922,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       syncItemToGas(updatedItemForGas);
     }
 
+    // Optimistic background sync: Simpan rekam transaksi pemakaian ke sheet Penggunaan_Bahan
+    syncTransactionToGas(newTransaction, item.unit);
+
     setTransactions((prev) => [newTransaction, ...prev]);
 
     const labName = LAB_DEFINITIONS[tx.targetLab]?.shortName || tx.targetLab;
@@ -2984,6 +3027,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     if (transferredItemForGas) {
       syncItemToGas(transferredItemForGas);
     }
+
+    // Optimistic background sync: Simpan rekam transfer mutasi antar lab ke Google Sheets
+    syncTransactionToGas(newTx, item.unit);
 
     setTransactions((prev) => [newTx, ...prev]);
 

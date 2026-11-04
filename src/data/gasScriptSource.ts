@@ -366,11 +366,12 @@ function handleGetData(sheetName) {
     });
   }
 
-  var lastRow = sheet.getLastRow();
-  var lastCol = sheet.getLastColumn();
+  // Optimasi Performa: Ambil seluruh data sheet sekaligus menggunakan getDataRange().getValues()
+  var dataRange = sheet.getDataRange();
+  var values = dataRange ? dataRange.getValues() : [];
 
-  // Jika sheet kosong atau hanya berisi baris header (tanpa data)
-  if (lastRow <= 1 || lastCol === 0) {
+  // Jika sheet kosong atau hanya berisi baris header (tanpa baris data)
+  if (!values || values.length <= 1 || values[0].length === 0) {
     return createJsonResponse({
       status: 'success',
       sheet: resolvedName,
@@ -379,7 +380,6 @@ function handleGetData(sheetName) {
     });
   }
 
-  var values = sheet.getRange(1, 1, lastRow, lastCol).getValues();
   var headers = values[0];
   var rows = [];
 
@@ -525,13 +525,17 @@ function doPost(e) {
     }
 
     if (foundRow !== -1) {
+      // Optimasi Performa: Ambil 1 baris penuh, ubah di memori, dan simpan sekaligus dengan 1 panggilan setValues
+      var currentRowValues = sheet.getRange(foundRow, 1, 1, existingHeaders.length).getValues()[0];
       for (var col = 0; col < existingHeaders.length; col++) {
         var hName = String(existingHeaders[col]).trim();
         var val = getFieldValue(record, hName);
         if (val !== undefined && val !== null) {
-          sheet.getRange(foundRow, col + 1).setValue(val);
+          currentRowValues[col] = val;
         }
       }
+      sheet.getRange(foundRow, 1, 1, existingHeaders.length).setValues([currentRowValues]);
+
       return createJsonResponse({
         status: 'success',
         action: 'update',

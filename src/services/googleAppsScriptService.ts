@@ -20,6 +20,7 @@ import {
   ToolLoanRecord,
   LoanStatus,
   LoanBorrowerType,
+  StockTransaction,
 } from '../types/inventory';
 import { LabBannerItem, normalizeMediaUrl } from '../data/labBanners';
 
@@ -39,7 +40,8 @@ export type GasSheetName =
   | 'Data_Siswa'
   | 'E_Rapot'
   | 'E_Raport'
-  | 'Pengguna';
+  | 'Pengguna'
+  | 'Penggunaan_Bahan';
 
 export interface GasApiResponse<T = any> {
   status: 'online' | 'success' | 'error';
@@ -271,6 +273,95 @@ export const saveSheetData = async (
     return {
       success: false,
       message: `Gagal mengirim data ke sheet ${sheetName}: ${err.message || 'Kesalahan jaringan'}`,
+    };
+  }
+};
+
+/**
+ * Update data (POST action=update) on a specific sheet in Google Sheets
+ * Matches target ID and updates the corresponding row in place using fast batch setValues.
+ */
+export const updateSheetData = async (
+  sheetName: GasSheetName,
+  targetId: string | number,
+  dataRecord: Record<string, any>,
+  apiUrl: string = getGasApiUrl()
+): Promise<{ success: boolean; message: string }> => {
+  try {
+    const payload = {
+      action: 'update',
+      sheet: sheetName,
+      id: targetId,
+      data: { ...dataRecord, id: targetId },
+    };
+
+    const res = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      return {
+        success: false,
+        message: `HTTP ${res.status}: Gagal memperbarui data pada sheet ${sheetName}.`,
+      };
+    }
+
+    const json = await res.json();
+    return {
+      success: json.status === 'success',
+      message: json.message || `Data pada sheet ${sheetName} berhasil diperbarui.`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal memperbarui data di sheet ${sheetName}: ${err.message || 'Kesalahan jaringan'}`,
+    };
+  }
+};
+
+/**
+ * Delete data (POST action=delete) from a specific sheet in Google Sheets
+ */
+export const deleteSheetData = async (
+  sheetName: GasSheetName,
+  targetId: string | number,
+  apiUrl: string = getGasApiUrl()
+): Promise<{ success: boolean; message: string }> => {
+  try {
+    const payload = {
+      action: 'delete',
+      sheet: sheetName,
+      id: targetId,
+    };
+
+    const res = await fetch(apiUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'text/plain;charset=utf-8',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) {
+      return {
+        success: false,
+        message: `HTTP ${res.status}: Gagal menghapus data dari sheet ${sheetName}.`,
+      };
+    }
+
+    const json = await res.json();
+    return {
+      success: json.status === 'success',
+      message: json.message || `Data berhasil dihapus dari sheet ${sheetName}.`,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      message: `Gagal menghapus data di sheet ${sheetName}: ${err.message || 'Kesalahan jaringan'}`,
     };
   }
 };
@@ -731,11 +822,37 @@ export const mapGasRowToStudent = (
 };
 
 // ==============================================================================
-// ASYNCHRONOUS REAL-TIME SYNC UTILITIES (NON-BLOCKING)
+// ASYNCHRONOUS REAL-TIME SYNC UTILITIES (NON-BLOCKING & OPTIMISTIC BACKGROUND)
 // ==============================================================================
 
 /**
- * Asynchronously sync an item to Google Sheets in background
+ * Map StockTransaction to Penggunaan_Bahan row in Google Sheets
+ */
+export const mapTransactionToGasPayload = (
+  tx: StockTransaction,
+  unit: string = 'Unit'
+): Record<string, any> => {
+  return {
+    ID_Transaksi: tx.id,
+    ID_Barang: tx.itemId,
+    Kode_Barang: tx.itemCode,
+    Nama_Barang: tx.itemName,
+    Tipe_Transaksi: tx.type,
+    Jumlah: tx.quantity,
+    Satuan: unit,
+    Tanggal: tx.date,
+    Lab_Tujuan: tx.targetLab,
+    Lab_Asal: tx.fromLab || '-',
+    Keperluan_Praktikum: tx.purpose,
+    Kelas_Rombel: tx.studentClassOrBatch || '-',
+    Nama_PIC: tx.picName,
+    Kondisi_Barang: tx.conditionStatus,
+    Catatan: tx.notes || '-',
+  };
+};
+
+/**
+ * Asynchronously sync an item to Google Sheets in background (Optimistic UI)
  */
 export const syncItemToGas = (item: InventoryItem, apiUrl: string = getGasApiUrl()): void => {
   const { targetSheet, row } = mapItemToGasPayload(item);
@@ -745,7 +862,32 @@ export const syncItemToGas = (item: InventoryItem, apiUrl: string = getGasApiUrl
 };
 
 /**
- * Asynchronously sync an activity to Google Sheets in background
+ * Asynchronously update an item in Google Sheets in background (Optimistic UI)
+ */
+export const syncUpdateItemInGas = (item: InventoryItem, apiUrl: string = getGasApiUrl()): void => {
+  const { targetSheet, row } = mapItemToGasPayload(item);
+  const targetId = item.code || item.id;
+  updateSheetData(targetSheet, targetId, row, apiUrl).catch((err) => {
+    console.warn(`[GAS] Background update item failed for ${item.name}:`, err);
+  });
+};
+
+/**
+ * Asynchronously delete an item from Google Sheets in background (Optimistic UI)
+ */
+export const syncDeleteItemFromGas = (
+  itemCodeOrId: string,
+  isChemical: boolean = false,
+  apiUrl: string = getGasApiUrl()
+): void => {
+  const targetSheet: GasSheetName = isChemical ? 'Bahan' : 'Alat';
+  deleteSheetData(targetSheet, itemCodeOrId, apiUrl).catch((err) => {
+    console.warn(`[GAS] Background delete item failed for ${itemCodeOrId}:`, err);
+  });
+};
+
+/**
+ * Asynchronously sync an activity to Google Sheets in background (Optimistic UI)
  */
 export const syncActivityToGas = (
   act: LabActivityRecord,
@@ -757,13 +899,13 @@ export const syncActivityToGas = (
     console.warn(`[GAS] Background sync activity failed for ${act.judul_percobaan}:`, err);
   });
 
-  // If there are scores, also sync to E_Rapot in background
+  // If there are scores, also sync to E_Raport in background
   try {
     const scores = act.rekap_nilai_json ? JSON.parse(act.rekap_nilai_json) : [];
     if (Array.isArray(scores) && scores.length > 0) {
       scores.slice(0, 5).forEach((sc: any, idx: number) => {
         saveSheetData(
-          'E_Rapot',
+          'E_Raport',
           {
             ID_Nilai: `RAP-${act.id}-${sc.nisn || idx}`,
             NISN: sc.nisn || '-',
@@ -782,7 +924,20 @@ export const syncActivityToGas = (
 };
 
 /**
- * Asynchronously sync a new user account to Google Sheets in background
+ * Asynchronously delete a journal activity from Google Sheets in background (Optimistic UI)
+ */
+export const syncDeleteActivityFromGas = (
+  activityId: number | string,
+  apiUrl: string = getGasApiUrl()
+): void => {
+  const targetId = `JRN-${activityId}`;
+  deleteSheetData('Jurnal_Praktikum', targetId, apiUrl).catch((err) => {
+    console.warn(`[GAS] Background delete activity failed for ${activityId}:`, err);
+  });
+};
+
+/**
+ * Asynchronously sync a new user account to Google Sheets in background (Optimistic UI)
  */
 export const syncUserToGas = (user: UserAccount, apiUrl: string = getGasApiUrl()): void => {
   const row = mapUserToGasPayload(user);
@@ -792,7 +947,16 @@ export const syncUserToGas = (user: UserAccount, apiUrl: string = getGasApiUrl()
 };
 
 /**
- * Asynchronously sync a student to Google Sheets in background
+ * Asynchronously delete a user account from Google Sheets in background (Optimistic UI)
+ */
+export const syncDeleteUserFromGas = (userId: string, apiUrl: string = getGasApiUrl()): void => {
+  deleteSheetData('Pengguna', userId, apiUrl).catch((err) => {
+    console.warn(`[GAS] Background delete user failed for ${userId}:`, err);
+  });
+};
+
+/**
+ * Asynchronously sync a student to Google Sheets in background (Optimistic UI)
  */
 export const syncStudentToGas = (
   student: LabStudent,
@@ -806,7 +970,19 @@ export const syncStudentToGas = (
 };
 
 /**
- * Asynchronously sync a tool loan record to Google Sheets in background
+ * Asynchronously delete a student from Google Sheets in background (Optimistic UI)
+ */
+export const syncDeleteStudentFromGas = (
+  studentId: number | string,
+  apiUrl: string = getGasApiUrl()
+): void => {
+  deleteSheetData('Data_Siswa', studentId, apiUrl).catch((err) => {
+    console.warn(`[GAS] Background delete student failed for ${studentId}:`, err);
+  });
+};
+
+/**
+ * Asynchronously sync a tool loan record to Google Sheets in background (Optimistic UI)
  */
 export const syncLoanToGas = (
   loan: ToolLoanRecord,
@@ -815,6 +991,32 @@ export const syncLoanToGas = (
   const row = mapLoanToGasPayload(loan);
   saveSheetData('Peminjaman', row, apiUrl).catch((err) => {
     console.warn(`[GAS] Background sync loan failed for ${loan.itemName}:`, err);
+  });
+};
+
+/**
+ * Asynchronously delete a loan record from Google Sheets in background (Optimistic UI)
+ */
+export const syncDeleteLoanFromGas = (
+  loanCodeOrId: string,
+  apiUrl: string = getGasApiUrl()
+): void => {
+  deleteSheetData('Peminjaman', loanCodeOrId, apiUrl).catch((err) => {
+    console.warn(`[GAS] Background delete loan failed for ${loanCodeOrId}:`, err);
+  });
+};
+
+/**
+ * Asynchronously sync a material/stock usage transaction to Google Sheets in background (Optimistic UI)
+ */
+export const syncTransactionToGas = (
+  tx: StockTransaction,
+  unit: string = 'Unit',
+  apiUrl: string = getGasApiUrl()
+): void => {
+  const row = mapTransactionToGasPayload(tx, unit);
+  saveSheetData('Penggunaan_Bahan', row, apiUrl).catch((err) => {
+    console.warn(`[GAS] Background sync transaction failed for ${tx.itemName}:`, err);
   });
 };
 
@@ -832,12 +1034,11 @@ export const syncBannerToGas = (
   });
 };
 
-/**
- * Fetch and parse all 8 sheets from Google Apps Script Web App
- */
-export const fetchAllGasData = async (
-  apiUrl: string = getGasApiUrl()
-): Promise<{
+// ==============================================================================
+// IN-MEMORY CACHE MECHANISM (Mencegah Re-fetch Berat Saat Berpindah Halaman)
+// ==============================================================================
+
+export interface GasFetchAllDataResult {
   success: boolean;
   items: InventoryItem[];
   loans: ToolLoanRecord[];
@@ -856,7 +1057,34 @@ export const fetchAllGasData = async (
     pengguna: number;
   };
   message: string;
-}> => {
+}
+
+let gasDataMemoryCache: GasFetchAllDataResult | null = null;
+let gasDataCacheTimestamp: number = 0;
+export const GAS_CACHE_TTL_MS = 5 * 60 * 1000; // 5 Menit Cache TTL
+
+/**
+ * Invalidate the memory cache manually (misal setelah refresh manual / import selesai)
+ */
+export const invalidateGasCache = (): void => {
+  gasDataMemoryCache = null;
+  gasDataCacheTimestamp = 0;
+};
+
+/**
+ * Fetch and parse all sheets from Google Apps Script Web App
+ * Memanfaatkan in-memory cache dengan TTL 5 menit agar perpindahan halaman instan tanpa re-fetch 7 tabel berulang.
+ */
+export const fetchAllGasData = async (
+  apiUrl: string = getGasApiUrl(),
+  forceRefresh: boolean = false
+): Promise<GasFetchAllDataResult> => {
+  // 1. Cek Cache In-Memory: jika masih valid dan tidak dipaksa refresh, kembalikan instan
+  const now = Date.now();
+  if (!forceRefresh && gasDataMemoryCache && now - gasDataCacheTimestamp < GAS_CACHE_TTL_MS) {
+    return gasDataMemoryCache;
+  }
+
   try {
     const [alatRes, bahanRes, pinjamRes, slideRes, jurnalRes, siswaRes, penggunaRes, erapotRes] =
       await Promise.all([
@@ -933,7 +1161,7 @@ export const fetchAllGasData = async (
       });
     }
 
-    return {
+    const result: GasFetchAllDataResult = {
       success: true,
       items: parsedItems,
       loans: parsedLoans,
@@ -951,8 +1179,14 @@ export const fetchAllGasData = async (
         erapot: erapotRes.data?.length || 0,
         pengguna: penggunaRes.data?.length || 0,
       },
-      message: 'Seluruh 8 sheet berhasil disinkronkan dengan Google Sheets.',
+      message: 'Seluruh tabel Google Sheets berhasil disinkronkan ke SIMLAB.',
     };
+
+    // Simpan ke memory cache
+    gasDataMemoryCache = result;
+    gasDataCacheTimestamp = Date.now();
+
+    return result;
   } catch (err: any) {
     return {
       success: false,
