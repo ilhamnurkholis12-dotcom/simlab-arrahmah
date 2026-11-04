@@ -114,17 +114,22 @@ export const GoogleSheetsSyncModal: React.FC<GoogleSheetsSyncModalProps> = ({
 
   // Test connection on modal open
   useEffect(() => {
-    if (isOpen && !testStatus.tested) {
-      handleTestConnection();
+    if (isOpen) {
+      const activeUrl = getGasApiUrl();
+      setApiUrlState(activeUrl);
+      if (!testStatus.tested) {
+        handleTestConnection(activeUrl);
+      }
     }
   }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const handleTestConnection = async () => {
+  const handleTestConnection = async (overrideUrl?: string | React.MouseEvent) => {
+    const target = typeof overrideUrl === 'string' && overrideUrl ? overrideUrl : apiUrl;
     setTestStatus({ tested: true, loading: true });
-    addLog(`Menguji koneksi ke Google Apps Script: ${apiUrl}...`, 'info');
-    const res = await testGasConnection(apiUrl);
+    addLog(`Menguji koneksi ke Google Apps Script: ${target}...`, 'info');
+    const res = await testGasConnection(target);
     setTestStatus({
       tested: true,
       loading: false,

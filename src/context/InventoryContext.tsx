@@ -57,11 +57,18 @@ import {
   syncActivityToGas,
   syncUserToGas,
   syncStudentToGas,
+  syncLoanToGas,
+  syncBannerToGas,
   fetchAllGasData,
   fetchSheetData,
   mapGasRowToUser,
   GasSyncStatus,
 } from '../services/googleAppsScriptService';
+import {
+  LabBannerItem,
+  DEFAULT_LAB_BANNERS,
+  normalizeMediaUrl,
+} from '../data/labBanners';
 
 export const AUTHORIZED_HEAD_OF_LAB_EMAIL = 'Ilham.nurkholis114@guru.sma.belajar.id';
 
@@ -97,6 +104,10 @@ interface InventoryContextType {
     }
   ) => { success: boolean; message: string };
   deleteToolLoan: (loanId: string) => { success: boolean; message: string };
+
+  // Slideshow / Pengumuman & Media Lab
+  slides: LabBannerItem[];
+  updateSlides: (newSlides: LabBannerItem[]) => void;
 
   // Modul Kalibrasi Alat Presisi & Sensor Laboratorium
   calibrations: CalibrationRecord[];
@@ -323,6 +334,44 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY_CALIBRATIONS, JSON.stringify(calibrations));
   }, [calibrations]);
+
+  // Slideshow & Media Banners State
+  const [slides, setSlides] = useState<LabBannerItem[]>(() => {
+    try {
+      const saved = localStorage.getItem('simlab_custom_banners_v1');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.map((item: LabBannerItem) => ({
+            ...item,
+            url: normalizeMediaUrl(item.url),
+            posterUrl: item.posterUrl ? normalizeMediaUrl(item.posterUrl) : item.posterUrl,
+          }));
+        }
+      }
+    } catch {
+      // ignore
+    }
+    return DEFAULT_LAB_BANNERS;
+  });
+
+  const updateSlides = useCallback((newSlides: LabBannerItem[]) => {
+    const normalizedList = newSlides.map((s) => ({
+      ...s,
+      url: normalizeMediaUrl(s.url),
+      posterUrl: s.posterUrl ? normalizeMediaUrl(s.posterUrl) : s.posterUrl,
+    }));
+    setSlides(normalizedList);
+    try {
+      localStorage.setItem('simlab_custom_banners_v1', JSON.stringify(normalizedList));
+    } catch {
+      // ignore
+    }
+    // Background sync to Google Sheets
+    normalizedList.forEach((slide, idx) => {
+      syncBannerToGas(slide, idx + 1);
+    });
+  }, []);
   // Toast notifications state (max 4 concurrent floating alerts)
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
@@ -614,6 +663,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     stats: {
       stokAlat: 0,
       bahanKimia: 0,
+      peminjaman: 0,
+      slideshow: 0,
       jurnalPraktikum: 0,
       dataSiswa: 0,
       erapot: 0,
@@ -638,12 +689,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                 if (existing) {
                   itemMap.set(key, {
                     ...existing,
-                    name: remote.name || existing.name,
+                    ...remote,
+                    distribution: remote.distribution || existing.distribution,
                     currentTotalStock: remote.currentTotalStock ?? existing.currentTotalStock,
-                    unit: remote.unit || existing.unit,
-                    brandOrSpec: remote.brandOrSpec || existing.brandOrSpec,
-                    storageRack: remote.storageRack || existing.storageRack,
-                    lastUpdated: remote.lastUpdated || existing.lastUpdated,
                   });
                 } else {
                   itemMap.set(key, remote);
@@ -681,7 +729,29 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             });
           }
 
-          // 3. Hydrate Jurnal_Praktikum
+          // 3. Hydrate Peminjaman Alat (Loans)
+          if (res.loans && res.loans.length > 0) {
+            setLoans((prevLoans) => {
+              const loanMap = new Map(prevLoans.map((l) => [l.code || l.id, l]));
+              res.loans.forEach((remoteLoan) => {
+                const key = remoteLoan.code || remoteLoan.id;
+                loanMap.set(key, remoteLoan);
+              });
+              return Array.from(loanMap.values());
+            });
+          }
+
+          // 4. Hydrate Slideshow / Informasi Lab (Banners)
+          if (res.banners && res.banners.length > 0) {
+            setSlides(res.banners);
+            try {
+              localStorage.setItem('simlab_custom_banners_v1', JSON.stringify(res.banners));
+            } catch {
+              // ignore
+            }
+          }
+
+          // 5. Hydrate Jurnal_Praktikum
           if (res.activities.length > 0) {
             setLabActivities((prevAct) => {
               const actMap = new Map(prevAct.map((a) => [a.id, a]));
@@ -694,7 +764,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             });
           }
 
-          // 4. Hydrate Data_Siswa
+          // 6. Hydrate Data_Siswa
           if (res.students.length > 0) {
             setStudents((prevStudents) => {
               const stdMap = new Map(prevStudents.map((s) => [s.id, s]));
@@ -1915,6 +1985,9 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     setLoans((prev) => [newRecord, ...prev]);
 
+    // Real-time synchronization to Google Sheets (Peminjaman)
+    syncLoanToGas(newRecord);
+
     showToast({
       type: 'success',
       title: 'Peminjaman Dicatat',
@@ -1948,9 +2021,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const status: LoanStatus = isDamaged ? 'KEMBALI_RUSAK_PECAH' : 'KEMBALI_BAIK';
     const damagedQty = returnData.damagedQuantity ?? (isDamaged ? 1 : 0);
 
+    let updatedLoanForGas: ToolLoanRecord | null = null;
     const updatedLoans = loans.map((l) => {
       if (l.id === loanId) {
-        return {
+        const updated: ToolLoanRecord = {
           ...l,
           status,
           actualReturnDate: returnData.actualReturnDate,
@@ -1960,11 +2034,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           actionTaken: returnData.actionTaken || '',
           notes: returnData.notes ? `${l.notes || ''} [Pengembalian: ${returnData.notes}]` : l.notes,
         };
+        updatedLoanForGas = updated;
+        return updated;
       }
       return l;
     });
 
     setLoans(updatedLoans);
+
+    if (updatedLoanForGas) {
+      syncLoanToGas(updatedLoanForGas);
+    }
 
     // Jika terjadi kerusakan / pecah, buat entri mutasi keluar dan update status kondisi pada barang inventaris
     if (isDamaged && damagedQty > 0) {
@@ -3315,6 +3395,8 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         addToolLoan,
         returnToolLoan,
         deleteToolLoan,
+        slides,
+        updateSlides,
         calibrations,
         dueCalibrations,
         overdueCalibrationsCount,

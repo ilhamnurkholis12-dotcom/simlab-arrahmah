@@ -33,28 +33,8 @@ import {
 const STORAGE_KEY_BANNERS = 'simlab_custom_banners_v1';
 
 export const LabBannerSlideshow: React.FC = () => {
-  const { showToast, currentUser, isHeadOfLab } = useInventory();
+  const { showToast, currentUser, isHeadOfLab, slides, updateSlides } = useInventory();
   const isAdmin = currentUser?.role === 'KEPALA_LAB' || isHeadOfLab;
-
-  // Load slides from localStorage or fallback to DEFAULT_LAB_BANNERS with automatic URL normalization
-  const [slides, setSlides] = useState<LabBannerItem[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY_BANNERS);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed.map((item: LabBannerItem) => ({
-            ...item,
-            url: normalizeMediaUrl(item.url),
-            posterUrl: item.posterUrl ? normalizeMediaUrl(item.posterUrl) : item.posterUrl,
-          }));
-        }
-      }
-    } catch {
-      // ignore
-    }
-    return DEFAULT_LAB_BANNERS;
-  });
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlaying, setIsPlaying] = useState(true);
@@ -75,7 +55,7 @@ export const LabBannerSlideshow: React.FC = () => {
     return () => clearInterval(timer);
   }, [isPlaying, slides.length, currentIndex]);
 
-  // Persist slides to localStorage when modified (automatically normalized)
+  // Persist slides to context and Google Sheets when modified (automatically normalized)
   const handleSaveSlides = (updated: LabBannerItem[]) => {
     if (!isAdmin) {
       showToast({
@@ -86,17 +66,7 @@ export const LabBannerSlideshow: React.FC = () => {
       return;
     }
 
-    const normalizedList = updated.map((s) => ({
-      ...s,
-      url: normalizeMediaUrl(s.url),
-      posterUrl: s.posterUrl ? normalizeMediaUrl(s.posterUrl) : s.posterUrl,
-    }));
-    setSlides(normalizedList);
-    try {
-      localStorage.setItem(STORAGE_KEY_BANNERS, JSON.stringify(normalizedList));
-    } catch {
-      // ignore
-    }
+    updateSlides(updated);
   };
 
   const handleResetToDefault = () => {
@@ -109,7 +79,7 @@ export const LabBannerSlideshow: React.FC = () => {
       return;
     }
 
-    setSlides(DEFAULT_LAB_BANNERS);
+    updateSlides(DEFAULT_LAB_BANNERS);
     setCurrentIndex(0);
     localStorage.removeItem(STORAGE_KEY_BANNERS);
     setIsEditorOpen(false);

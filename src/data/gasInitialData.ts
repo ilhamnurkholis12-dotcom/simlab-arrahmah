@@ -137,6 +137,31 @@ export const GAS_INITIAL_DATABASE: Record<string, SheetSeedDefinition> = {
     ]
   },
 
+  // 5. SLIDESHOW
+  Slideshow: {
+    tableName: 'Slideshow',
+    description: 'Foto Publik Gedung Kampus, Interior Lab IPA & Video Dokumentasi K3',
+    headers: ['ID_Slide', 'Judul', 'Subjudul', 'Kategori_Badge', 'URL_Media', 'Tipe_Media', 'Lokasi_Gedung', 'Status_Aktif'],
+    rawArray: [
+      ['SLD-001', 'Gedung Utama SMP & SMA IT Ar-Rahmah Cendekia', 'Kampus terpadu modern dengan fasilitas sains dan ruang riset laboratorium berstandar K3.', 'Gedung Sekolah', 'https://lh3.googleusercontent.com/d/1u4eCdMdtcNPNj87jFO5XDqSjxFaxY4Fo', 'image', 'Kompleks Gedung Kampus Cimone', 'Aktif'],
+      ['SLD-002', 'Interior Ruang Laboratorium IPA Terpadu', 'Pusat observasi dan praktikum terintegrasi dengan meja praktikum berkeramik dan exhaust fume hood.', 'Interior Lab', 'https://lh3.googleusercontent.com/d/17JSXiw02JISFZNr-cTNRuYPTWmSuIsTw', 'image', 'Gedung B Unit Laboratorium', 'Aktif'],
+      ['SLD-003', 'Laboratorium Fisika & Eksperimen Optik', 'Fasilitas praktikum mekanika, optika canggih, kelistrikan, dan gelombang bagi santri SMA IT Ar-Rahmah Cendekia.', 'Lab Fisika (SMA)', 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=1600&q=80', 'image', 'Gedung B Lt. 2 . R. Physics Lab', 'Aktif'],
+      ['SLD-004', 'Laboratorium Kimia Terpadu & Reagen', 'Ruang reaksi stoikiometri, titrasi asam basa, serta analisis larutan kimia dengan standar K3 keselamatan laboratorium lengkap.', 'Lab Kimia (SMA)', 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=1600&q=80', 'image', 'Gedung B Lt. 1 . R. Chemistry Lab', 'Aktif'],
+      ['SLD-005', 'Laboratorium Biologi & Pengamatan Mikroskopis', 'Observasi sitologi sel, preparat jaringan basah, fisiologi hayati, dan pembedahan anatomi untuk eksplorasi biologi modern.', 'Lab Biologi (SMA)', 'https://images.unsplash.com/photo-1579154204601-01588f351e67?auto=format&fit=crop&w=1600&q=80', 'image', 'Gedung B Lt. 1 . R. Biology Lab', 'Aktif'],
+      ['SLD-006', 'Laboratorium IPA Terpadu Santri SMP', 'Wahana inkuiri sains terpadu, kit praktikum tematik, dan pembentukan karakter saintis muda muslim berakhlak mulia.', 'Lab IPA Terpadu (SMP)', 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=1600&q=80', 'image', 'Gedung B Lt. 1 & 2 . R. Science Lab', 'Aktif'],
+      ['SLD-007', 'Klip Video Dokumentasi & Budaya Keselamatan Kerja Lab', 'Video profil panduan SOP keselamatan kerja (K3), tata tertib penggunaan alat gelas, dan rekam suasana praktikum terpadu.', 'Video Profil Lab', 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', 'video', 'Gedung B Kompleks Laboratorium Sains', 'Aktif']
+    ],
+    records: [
+      { ID_Slide: 'SLD-001', Judul: 'Gedung Utama SMP & SMA IT Ar-Rahmah Cendekia', Subjudul: 'Kampus terpadu modern dengan fasilitas sains dan ruang riset laboratorium berstandar K3.', Kategori_Badge: 'Gedung Sekolah', URL_Media: 'https://lh3.googleusercontent.com/d/1u4eCdMdtcNPNj87jFO5XDqSjxFaxY4Fo', Tipe_Media: 'image', Lokasi_Gedung: 'Kompleks Gedung Kampus Cimone', Status_Aktif: 'Aktif' },
+      { ID_Slide: 'SLD-002', Judul: 'Interior Ruang Laboratorium IPA Terpadu', Subjudul: 'Pusat observasi dan praktikum terintegrasi dengan meja praktikum berkeramik dan exhaust fume hood.', Kategori_Badge: 'Interior Lab', URL_Media: 'https://lh3.googleusercontent.com/d/17JSXiw02JISFZNr-cTNRuYPTWmSuIsTw', Tipe_Media: 'image', Lokasi_Gedung: 'Gedung B Unit Laboratorium', Status_Aktif: 'Aktif' },
+      { ID_Slide: 'SLD-003', Judul: 'Laboratorium Fisika & Eksperimen Optik', Subjudul: 'Fasilitas praktikum mekanika, optika canggih, kelistrikan, dan gelombang bagi santri SMA IT Ar-Rahmah Cendekia.', Kategori_Badge: 'Lab Fisika (SMA)', URL_Media: 'https://images.unsplash.com/photo-1532094349884-543bc11b234d?auto=format&fit=crop&w=1600&q=80', Tipe_Media: 'image', Lokasi_Gedung: 'Gedung B Lt. 2 . R. Physics Lab', Status_Aktif: 'Aktif' },
+      { ID_Slide: 'SLD-004', Judul: 'Laboratorium Kimia Terpadu & Reagen', Subjudul: 'Ruang reaksi stoikiometri, titrasi asam basa, serta analisis larutan kimia dengan standar K3 keselamatan laboratorium lengkap.', Kategori_Badge: 'Lab Kimia (SMA)', URL_Media: 'https://images.unsplash.com/photo-1582719478250-c89cae4dc85b?auto=format&fit=crop&w=1600&q=80', Tipe_Media: 'image', Lokasi_Gedung: 'Gedung B Lt. 1 . R. Chemistry Lab', Status_Aktif: 'Aktif' },
+      { ID_Slide: 'SLD-005', Judul: 'Laboratorium Biologi & Pengamatan Mikroskopis', Subjudul: 'Observasi sitologi sel, preparat jaringan basah, fisiologi hayati, dan pembedahan anatomi untuk eksplorasi biologi modern.', Kategori_Badge: 'Lab Biologi (SMA)', URL_Media: 'https://images.unsplash.com/photo-1579154204601-01588f351e67?auto=format&fit=crop&w=1600&q=80', Tipe_Media: 'image', Lokasi_Gedung: 'Gedung B Lt. 1 . R. Biology Lab', Status_Aktif: 'Aktif' },
+      { ID_Slide: 'SLD-006', Judul: 'Laboratorium IPA Terpadu Santri SMP', Subjudul: 'Wahana inkuiri sains terpadu, kit praktikum tematik, dan pembentukan karakter saintis muda muslim berakhlak mulia.', Kategori_Badge: 'Lab IPA Terpadu (SMP)', URL_Media: 'https://images.unsplash.com/photo-1507668077129-56e32842fceb?auto=format&fit=crop&w=1600&q=80', Tipe_Media: 'image', Lokasi_Gedung: 'Gedung B Lt. 1 & 2 . R. Science Lab', Status_Aktif: 'Aktif' },
+      { ID_Slide: 'SLD-007', Judul: 'Klip Video Dokumentasi & Budaya Keselamatan Kerja Lab', Subjudul: 'Video profil panduan SOP keselamatan kerja (K3), tata tertib penggunaan alat gelas, dan rekam suasana praktikum terpadu.', Kategori_Badge: 'Video Profil Lab', URL_Media: 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4', Tipe_Media: 'video', Lokasi_Gedung: 'Gedung B Kompleks Laboratorium Sains', Status_Aktif: 'Aktif' }
+    ]
+  },
+
   // 5. JURNAL PRAKTIKUM
   Jurnal_Praktikum: {
     tableName: 'Jurnal_Praktikum',
