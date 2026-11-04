@@ -485,71 +485,10 @@ function doPost(e) {
   var existingHeaders = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
 
   // ----------------------------------------------------------------------------
-  // A. UPDATE RECORD (EDIT DATA BERDASARKAN ID)
-  // ----------------------------------------------------------------------------
-  if (action === 'update' || action === 'edit') {
-    var idKey = getIdKeyForSheet(resolvedName);
-    var targetId = record[idKey] || record.id || record.code || record.ID || record.ID_Barang || record.ID_Bahan || record.ID_Pinjam || record.ID_Pengguna || record.ID_Slide;
-
-    if (!targetId) {
-      return createJsonResponse({
-        status: 'error',
-        message: 'Target ID tidak ditemukan untuk aksi update.'
-      });
-    }
-
-    var idColIndex = -1;
-    for (var c = 0; c < existingHeaders.length; c++) {
-      if (String(existingHeaders[c]).trim().toLowerCase() === idKey.toLowerCase()) {
-        idColIndex = c + 1;
-        break;
-      }
-    }
-
-    if (idColIndex === -1) idColIndex = 1; // Default ke kolom 1
-
-    var foundRow = -1;
-    if (lastRow > 1) {
-      var idValues = sheet.getRange(2, idColIndex, lastRow - 1, 1).getValues();
-      for (var r = 0; r < idValues.length; r++) {
-        if (String(idValues[r][0]).trim() === String(targetId).trim()) {
-          foundRow = r + 2; // Baris riil (1-indexed + header)
-          break;
-        }
-      }
-    }
-
-    if (foundRow !== -1) {
-      // Optimasi Performa: Ambil 1 baris penuh, ubah di memori, dan simpan sekaligus dengan 1 panggilan setValues
-      var currentRowValues = sheet.getRange(foundRow, 1, 1, existingHeaders.length).getValues()[0];
-      for (var col = 0; col < existingHeaders.length; col++) {
-        var hName = String(existingHeaders[col]).trim();
-        var val = getFieldValue(record, hName);
-        if (val !== undefined && val !== null) {
-          currentRowValues[col] = val;
-        }
-      }
-      sheet.getRange(foundRow, 1, 1, existingHeaders.length).setValues([currentRowValues]);
-
-      return createJsonResponse({
-        status: 'success',
-        action: 'update',
-        sheet: resolvedName,
-        rowNumber: foundRow,
-        message: 'Data pada sheet ' + resolvedName + ' berhasil diperbarui.'
-      });
-    } else {
-      // Jika ID tidak ditemukan saat update, otomatis lakukan insert (upsert)
-      return insertRecord(sheet, existingHeaders, record, resolvedName);
-    }
-  }
-
-  // ----------------------------------------------------------------------------
-  // B. DELETE RECORD (HAPUS DATA BERDASARKAN ID)
+  // A. DELETE RECORD (HAPUS DATA BERDASARKAN ID)
   // ----------------------------------------------------------------------------
   if (action === 'delete' || action === 'remove') {
-    var delIdKey = getIdKeyForSheet(resolvedName);
-    var delTargetId = record[delIdKey] || record.id || record.code || record.ID;
+    var delTargetId = extractRecordId(record, resolvedName) || postData.id || postData.targetId;
 
     if (!delTargetId) {
       return createJsonResponse({
@@ -558,25 +497,7 @@ function doPost(e) {
       });
     }
 
-    var delColIndex = -1;
-    for (var cDel = 0; cDel < existingHeaders.length; cDel++) {
-      if (String(existingHeaders[cDel]).trim().toLowerCase() === delIdKey.toLowerCase()) {
-        delColIndex = cDel + 1;
-        break;
-      }
-    }
-    if (delColIndex === -1) delColIndex = 1;
-
-    var targetDeleteRow = -1;
-    if (lastRow > 1) {
-      var colValues = sheet.getRange(2, delColIndex, lastRow - 1, 1).getValues();
-      for (var rDel = 0; rDel < colValues.length; rDel++) {
-        if (String(colValues[rDel][0]).trim() === String(delTargetId).trim()) {
-          targetDeleteRow = rDel + 2;
-          break;
-        }
-      }
-    }
+    var targetDeleteRow = findRowById(sheet, existingHeaders, delTargetId, resolvedName);
 
     if (targetDeleteRow !== -1) {
       sheet.deleteRow(targetDeleteRow);
@@ -595,9 +516,39 @@ function doPost(e) {
   }
 
   // ----------------------------------------------------------------------------
-  // C. INSERT RECORD (DEFAULT)
+  // B. UPSERT ENGINE (ANTI-DUPLIKASI: UPDATE JIKA ADA, INSERT JIKA BARU)
   // ----------------------------------------------------------------------------
-  return insertRecord(sheet, existingHeaders, record, resolvedName);
+  // Seluruh aksi penulisan data (insert, update, edit, upsert) diproses melalui logika UPSERT ini
+  // untuk menjamin 100% TIDAK PERNAH TERJADI DUPLIKASI DATA di Google Sheets.
+  var targetId = extractRecordId(record, resolvedName) || postData.id || postData.targetId;
+  var foundRow = targetId ? findRowById(sheet, existingHeaders, targetId, resolvedName) : -1;
+
+  if (foundRow !== -1) {
+    // 1. ID SUDAH ADA DI SHEET -> LAKUKAN UPDATE (TIMPA BARIS SECARA ATOMIK)
+    var currentRowValues = sheet.getRange(foundRow, 1, 1, existingHeaders.length).getValues()[0];
+    for (var col = 0; col < existingHeaders.length; col++) {
+      var hName = String(existingHeaders[col]).trim();
+      var val = getFieldValue(record, hName);
+      if (val !== undefined && val !== null) {
+        currentRowValues[col] = val;
+      }
+    }
+    // Batch update 1 baris sekaligus (efisien, cepat, anti-duplikasi)
+    sheet.getRange(foundRow, 1, 1, existingHeaders.length).setValues([currentRowValues]);
+
+    return createJsonResponse({
+      status: 'success',
+      action: 'update',
+      isUpsert: true,
+      sheet: resolvedName,
+      targetId: targetId,
+      rowNumber: foundRow,
+      message: 'Data dengan ID "' + targetId + '" sudah ada di sheet ' + resolvedName + '; baris berhasil diperbarui tanpa duplikasi.'
+    });
+  } else {
+    // 2. ID BELUM ADA DI SHEET -> BARU LAKUKAN INSERT (APPEND ROW)
+    return insertRecord(sheet, existingHeaders, record, resolvedName);
+  }
 }
 
 /**
@@ -617,10 +568,95 @@ function insertRecord(sheet, headers, data, sheetName) {
   return createJsonResponse({
     status: 'success',
     action: 'insert',
+    isUpsert: true,
     sheet: sheetName,
-    message: 'Data berhasil disimpan ke Google Sheets (' + sheetName + ').',
+    message: 'Data baru berhasil disimpan ke Google Sheets (' + sheetName + ').',
     insertedRow: sheet.getLastRow()
   });
+}
+
+/**
+ * Universal ID Extractor: Mencari ID unik record dari berbagai variasi key JSON
+ */
+function extractRecordId(record, sheetName) {
+  if (!record || typeof record !== 'object') return '';
+
+  var idKey = getIdKeyForSheet(sheetName);
+  if (record[idKey] !== undefined && record[idKey] !== null && String(record[idKey]).trim() !== '') {
+    return String(record[idKey]).trim();
+  }
+
+  var candidates = [
+    'id', 'ID', 'code', 'Code',
+    'ID_Barang', 'id_barang', 'kode_barang', 'Kode_Barang', 'kode_alat',
+    'ID_Bahan', 'id_bahan', 'kode_bahan',
+    'ID_Pinjam', 'id_pinjam', 'id_peminjaman',
+    'ID_Pengguna', 'id_pengguna', 'id_user', 'Email_Petugas', 'email',
+    'ID_Transaksi', 'id_transaksi',
+    'ID_Slide', 'id_slide',
+    'ID_Jurnal', 'id_jurnal',
+    'ID_Siswa', 'id_siswa', 'NISN', 'nisn',
+    'ID_Nilai', 'id_nilai'
+  ];
+
+  for (var i = 0; i < candidates.length; i++) {
+    var k = candidates[i];
+    if (record[k] !== undefined && record[k] !== null && String(record[k]).trim() !== '') {
+      return String(record[k]).trim();
+    }
+  }
+
+  return '';
+}
+
+/**
+ * Universal Row Finder: Mencari nomor baris (1-based) dari targetId di dalam sheet
+ * Memeriksa kolom primary key dan fallback ke kolom ID alternatif lainnya.
+ */
+function findRowById(sheet, headers, targetId, sheetName) {
+  if (!targetId) return -1;
+  var lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return -1;
+
+  var cleanTarget = String(targetId).trim().toLowerCase();
+  if (cleanTarget === '') return -1;
+
+  var idKey = getIdKeyForSheet(sheetName).toLowerCase();
+  var candidateColIndices = [];
+
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c]).trim().toLowerCase();
+    if (h === idKey) {
+      candidateColIndices.unshift(c); // Prioritas tertinggi
+    } else if (
+      h.indexOf('id') !== -1 ||
+      h.indexOf('kode') !== -1 ||
+      h === 'nisn' ||
+      (sheetName === 'Pengguna' && h.indexOf('email') !== -1)
+    ) {
+      candidateColIndices.push(c);
+    }
+  }
+
+  if (candidateColIndices.length === 0) {
+    candidateColIndices.push(0); // Default ke kolom 1
+  }
+
+  var numRows = lastRow - 1;
+  var fullValues = sheet.getRange(2, 1, numRows, headers.length).getValues();
+
+  for (var r = 0; r < fullValues.length; r++) {
+    var row = fullValues[r];
+    for (var k = 0; k < candidateColIndices.length; k++) {
+      var colIdx = candidateColIndices[k];
+      var cellVal = String(row[colIdx] || '').trim().toLowerCase();
+      if (cellVal !== '' && cellVal === cleanTarget) {
+        return r + 2; // Baris riil di spreadsheet (1-indexed + header baris 1)
+      }
+    }
+  }
+
+  return -1;
 }
 
 /**

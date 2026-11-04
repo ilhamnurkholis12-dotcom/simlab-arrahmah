@@ -210,7 +210,35 @@ export const fetchSheetData = async <T = any>(
 };
 
 /**
- * Save / Insert data (POST) to a specific sheet in Google Sheets
+ * In-Flight Request Deduplicator:
+ * Mencegah pengiriman request POST ganda (double-post) saat tombol submit atau sinkronisasi diklik berulang kali.
+ */
+const inFlightPostRequests = new Map<string, Promise<{ success: boolean; message: string }>>();
+
+const getRecordIdentifier = (dataRecord: Record<string, any>): string => {
+  if (!dataRecord || typeof dataRecord !== 'object') return '';
+  const val =
+    dataRecord.id ||
+    dataRecord.ID ||
+    dataRecord.code ||
+    dataRecord.ID_Barang ||
+    dataRecord.ID_Bahan ||
+    dataRecord.ID_Pinjam ||
+    dataRecord.ID_Pengguna ||
+    dataRecord.Email_Petugas ||
+    dataRecord.email ||
+    dataRecord.ID_Transaksi ||
+    dataRecord.ID_Slide ||
+    dataRecord.ID_Jurnal ||
+    dataRecord.ID_Siswa ||
+    dataRecord.NISN ||
+    dataRecord.ID_Nilai;
+  return val ? String(val).trim() : '';
+};
+
+/**
+ * Save / Upsert data (POST) to a specific sheet in Google Sheets
+ * Uses UPSERT logic (overwrites if ID exists, appends if new) to prevent duplicate rows.
  * Uses text/plain Content-Type to avoid browser CORS preflight blocks.
  */
 export const saveSheetData = async (
@@ -218,63 +246,84 @@ export const saveSheetData = async (
   dataRecord: Record<string, any>,
   apiUrl: string = getGasApiUrl()
 ): Promise<{ success: boolean; message: string }> => {
-  try {
-    const payload = {
-      action: 'insert',
-      sheet: sheetName,
-      data: dataRecord,
-    };
+  const recordId = getRecordIdentifier(dataRecord);
+  const dedupeKey = `upsert:${sheetName}:${recordId || JSON.stringify(dataRecord)}`;
 
-    const res = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
-      body: JSON.stringify(payload),
-    });
+  // Cegah double-post jika request dengan ID yang sama sedang aktif berjalan
+  if (recordId && inFlightPostRequests.has(dedupeKey)) {
+    return inFlightPostRequests.get(dedupeKey)!;
+  }
 
-    if (!res.ok) {
+  const executionPromise = (async () => {
+    try {
+      const payload = {
+        action: 'upsert', // Meminta UPSERT aman anti-duplikasi
+        sheet: sheetName,
+        id: recordId || undefined,
+        data: dataRecord,
+      };
+
+      const res = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        return {
+          success: false,
+          message: `HTTP ${res.status}: Gagal menyimpan data ke sheet ${sheetName}.`,
+        };
+      }
+
+      const json = await res.json();
+      if (json.status === 'success') {
+        return {
+          success: true,
+          message: json.message || `Data berhasil disimpan ke sheet ${sheetName}.`,
+        };
+      }
+
+      // Try fallback for E_Rapot -> E_Raport
+      if (sheetName === 'E_Rapot' && json.status === 'error') {
+        try {
+          const fbRes = await fetch(apiUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'upsert', sheet: 'E_Raport', id: recordId || undefined, data: dataRecord }),
+          });
+          const fbJson = await fbRes.json();
+          if (fbJson.status === 'success') {
+            return { success: true, message: fbJson.message || 'Data berhasil disimpan ke E_Raport.' };
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       return {
         success: false,
-        message: `HTTP ${res.status}: Gagal menyimpan data ke sheet ${sheetName}.`,
+        message: json.message || `Gagal menyimpan data ke sheet ${sheetName}.`,
       };
-    }
-
-    const json = await res.json();
-    if (json.status === 'success') {
+    } catch (err: any) {
       return {
-        success: true,
-        message: json.message || `Data berhasil disimpan ke sheet ${sheetName}.`,
+        success: false,
+        message: `Gagal mengirim data ke sheet ${sheetName}: ${err.message || 'Kesalahan jaringan'}`,
       };
-    }
-
-    // Try fallback for E_Rapot -> E_Raport
-    if (sheetName === 'E_Rapot' && json.status === 'error') {
-      try {
-        const fbRes = await fetch(apiUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({ action: 'insert', sheet: 'E_Raport', data: dataRecord }),
-        });
-        const fbJson = await fbRes.json();
-        if (fbJson.status === 'success') {
-          return { success: true, message: fbJson.message || 'Data berhasil disimpan ke E_Raport.' };
-        }
-      } catch {
-        // ignore
+    } finally {
+      if (recordId) {
+        inFlightPostRequests.delete(dedupeKey);
       }
     }
+  })();
 
-    return {
-      success: false,
-      message: json.message || `Gagal menyimpan data ke sheet ${sheetName}.`,
-    };
-  } catch (err: any) {
-    return {
-      success: false,
-      message: `Gagal mengirim data ke sheet ${sheetName}: ${err.message || 'Kesalahan jaringan'}`,
-    };
+  if (recordId) {
+    inFlightPostRequests.set(dedupeKey, executionPromise);
   }
+
+  return executionPromise;
 };
 
 /**
@@ -287,40 +336,60 @@ export const updateSheetData = async (
   dataRecord: Record<string, any>,
   apiUrl: string = getGasApiUrl()
 ): Promise<{ success: boolean; message: string }> => {
-  try {
-    const payload = {
-      action: 'update',
-      sheet: sheetName,
-      id: targetId,
-      data: { ...dataRecord, id: targetId },
-    };
+  const cleanId = String(targetId).trim();
+  const dedupeKey = `update:${sheetName}:${cleanId}`;
 
-    const res = await fetch(apiUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'text/plain;charset=utf-8',
-      },
-      body: JSON.stringify(payload),
-    });
+  // Cegah double-post update jika request update dengan ID sama sedang berjalan
+  if (cleanId && inFlightPostRequests.has(dedupeKey)) {
+    return inFlightPostRequests.get(dedupeKey)!;
+  }
 
-    if (!res.ok) {
+  const executionPromise = (async () => {
+    try {
+      const payload = {
+        action: 'update',
+        sheet: sheetName,
+        id: cleanId,
+        data: { ...dataRecord, id: cleanId },
+      };
+
+      const res = await fetch(apiUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/plain;charset=utf-8',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        return {
+          success: false,
+          message: `HTTP ${res.status}: Gagal memperbarui data pada sheet ${sheetName}.`,
+        };
+      }
+
+      const json = await res.json();
+      return {
+        success: json.status === 'success',
+        message: json.message || `Data pada sheet ${sheetName} berhasil diperbarui.`,
+      };
+    } catch (err: any) {
       return {
         success: false,
-        message: `HTTP ${res.status}: Gagal memperbarui data pada sheet ${sheetName}.`,
+        message: `Gagal memperbarui data di sheet ${sheetName}: ${err.message || 'Kesalahan jaringan'}`,
       };
+    } finally {
+      if (cleanId) {
+        inFlightPostRequests.delete(dedupeKey);
+      }
     }
+  })();
 
-    const json = await res.json();
-    return {
-      success: json.status === 'success',
-      message: json.message || `Data pada sheet ${sheetName} berhasil diperbarui.`,
-    };
-  } catch (err: any) {
-    return {
-      success: false,
-      message: `Gagal memperbarui data di sheet ${sheetName}: ${err.message || 'Kesalahan jaringan'}`,
-    };
+  if (cleanId) {
+    inFlightPostRequests.set(dedupeKey, executionPromise);
   }
+
+  return executionPromise;
 };
 
 /**
