@@ -1,7 +1,18 @@
 import React, { useState, useMemo } from 'react';
 import * as XLSX from 'xlsx';
 import { useInventory } from '../context/InventoryContext';
-import { LabStudent, LabClass, SchoolUnit, StudentStatus } from '../types/inventory';
+import {
+  LabStudent,
+  LabClass,
+  SchoolUnit,
+  StudentStatus,
+  ParsedExcelStudent,
+} from '../types/inventory';
+import {
+  isValidNisn,
+  generateFallbackNisn,
+  normalizeGender,
+} from '../services/googleAppsScriptService';
 import {
   GraduationCap,
   Users,
@@ -25,16 +36,11 @@ import {
   Info,
   Check,
   Lock,
+  Download,
+  Sparkles,
 } from 'lucide-react';
 
 import { matchId, safeParseScores, getSchoolUnit } from '../utils/helpers';
-
-interface ParsedExcelStudent {
-  nama_siswa: string;
-  nisn?: string;
-  nama_kelas: string;
-  tahun_ajaran?: string;
-}
 
 export const StudentClassRecords: React.FC = () => {
   const {
@@ -106,6 +112,7 @@ export const StudentClassRecords: React.FC = () => {
   const [excelParsedStudents, setExcelParsedStudents] = useState<ParsedExcelStudent[]>([]);
   const [excelErrorMsg, setExcelErrorMsg] = useState<string | null>(null);
   const [importMode, setImportMode] = useState<'AUTO_MULTI' | 'SINGLE_ACTIVE'>('AUTO_MULTI');
+  const [isImporting, setIsImporting] = useState(false);
 
   // Edit Student state (including StudentStatus: aktif / pindah / keluar)
   const [editingStudent, setEditingStudent] = useState<LabStudent | null>(null);
@@ -243,7 +250,59 @@ export const StudentClassRecords: React.FC = () => {
     }
   };
 
-  // 4. Handle Excel File Change (Multi-Halaman & Multi-Rombel Parsing)
+  // 4. Download Format Template Standar Excel (6 Kolom Konsisten dengan Google Sheets)
+  const handleDownloadStandardStudentTemplate = () => {
+    const templateHeaders = [
+      'NISN',
+      'Nama_Lengkap_Santri',
+      'Tingkat_Sekolah',
+      'Kelas_Rombel',
+      'Jenis_Kelamin',
+      'Status_Keaktifan',
+    ];
+
+    const sampleRows = [
+      {
+        NISN: '0075849301',
+        Nama_Lengkap_Santri: 'Ahmad Fathan Al-Ghifari',
+        Tingkat_Sekolah: 'SMA',
+        Kelas_Rombel: 'XII MIPA 1 (SMA)',
+        Jenis_Kelamin: 'Laki-laki',
+        Status_Keaktifan: 'Aktif',
+      },
+      {
+        NISN: '0079384722',
+        Nama_Lengkap_Santri: 'Aisyah Putri Azzahra',
+        Tingkat_Sekolah: 'SMA',
+        Kelas_Rombel: 'XII MIPA 1 (SMA)',
+        Jenis_Kelamin: 'Perempuan',
+        Status_Keaktifan: 'Aktif',
+      },
+      {
+        NISN: '-', // Jika NISN kosong/- di Excel, sistem otomatis men-generate ID Unik otomatis
+        Nama_Lengkap_Santri: 'Fakhri Ramadhan Al-Farisi',
+        Tingkat_Sekolah: 'SMP',
+        Kelas_Rombel: 'VIII-A (SMP Terpadu)',
+        Jenis_Kelamin: 'Laki-laki',
+        Status_Keaktifan: 'Aktif',
+      },
+      {
+        NISN: '', // Jika kosong, juga otomatis aman digenerate tanpa tabrakan baris di Google Sheets
+        Nama_Lengkap_Santri: 'Khansa Humaira Zahid',
+        Tingkat_Sekolah: 'SMP',
+        Kelas_Rombel: 'VIII-A (SMP Terpadu)',
+        Jenis_Kelamin: 'Perempuan',
+        Status_Keaktifan: 'Aktif',
+      },
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(sampleRows, { header: templateHeaders });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Data_Siswa');
+    XLSX.writeFile(wb, 'Format_Import_Santri_SIMLAB.xlsx');
+  };
+
+  // 5. Handle Excel File Change (Validasi NISN, Pembersihan Kolom & Pemisahan Kelas/Rombel)
   const handleExcelFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -263,6 +322,7 @@ export const StudentClassRecords: React.FC = () => {
         }
 
         const aggregatedList: ParsedExcelStudent[] = [];
+        let globalRowCounter = 1;
 
         // Parse through ALL sheets in the Excel workbook
         workbook.SheetNames.forEach((sheetName) => {
@@ -274,54 +334,167 @@ export const StudentClassRecords: React.FC = () => {
 
           // Determine if sheetName itself represents a class name
           const cleanSheetName = sheetName.trim();
-          const isGenericSheet = /^sheet\s*\d*$/i.test(cleanSheetName) || /^lembar\s*\d*$/i.test(cleanSheetName);
+          const isGenericSheet =
+            /^sheet\s*\d*$/i.test(cleanSheetName) ||
+            /^lembar\s*\d*$/i.test(cleanSheetName) ||
+            /^data_siswa$/i.test(cleanSheetName) ||
+            /^siswa$/i.test(cleanSheetName);
 
           rawJson.forEach((row) => {
-            let nama = '';
-            let nisn = '';
-            let rowKelas = '';
+            let rawNama = '';
+            let rawNisn = '';
+            let rawKelas = '';
+            let rawTingkat = '';
+            let rawGender = '';
+            let rawStatus = '';
             let tahun = '2025/2026';
 
             Object.keys(row).forEach((col) => {
               const cleanCol = col.toLowerCase().replace(/[^a-z0-9]/g, '');
               const val = String(row[col]).trim();
 
-              if (!nama && (cleanCol.includes('nama') || cleanCol.includes('siswa') || cleanCol.includes('name') || cleanCol.includes('santri'))) {
-                nama = val;
-              } else if (!nisn && (cleanCol.includes('nisn') || cleanCol.includes('nis') || cleanCol.includes('induk'))) {
-                nisn = val;
-              } else if (!rowKelas && (cleanCol.includes('kelas') || cleanCol.includes('rombel') || cleanCol.includes('class') || cleanCol.includes('tingkat'))) {
-                rowKelas = val;
-              } else if (cleanCol.includes('tahun') || cleanCol.includes('ajaran')) {
+              // Deteksi Kolom: Nama_Lengkap_Santri
+              if (
+                !rawNama &&
+                (cleanCol.includes('namalengkap') ||
+                  cleanCol.includes('namasantri') ||
+                  cleanCol.includes('namasiswa') ||
+                  cleanCol.includes('nama') ||
+                  cleanCol.includes('santri') ||
+                  cleanCol.includes('pesertadidik') ||
+                  cleanCol.includes('murid'))
+              ) {
+                rawNama = val;
+              }
+              // Deteksi Kolom: NISN
+              else if (
+                !rawNisn &&
+                (cleanCol.includes('nisn') ||
+                  cleanCol.includes('noinduk') ||
+                  cleanCol.includes('nomorinduk') ||
+                  cleanCol.includes('nis') ||
+                  cleanCol.includes('nik') ||
+                  cleanCol.includes('idsiswa'))
+              ) {
+                rawNisn = val;
+              }
+              // Deteksi Kolom: Kelas_Rombel
+              else if (
+                !rawKelas &&
+                (cleanCol.includes('kelasrombel') ||
+                  cleanCol.includes('rombel') ||
+                  cleanCol.includes('kelas') ||
+                  cleanCol.includes('subkelas') ||
+                  cleanCol.includes('kelompok') ||
+                  cleanCol.includes('class'))
+              ) {
+                rawKelas = val;
+              }
+              // Deteksi Kolom: Tingkat_Sekolah (SMP / SMA)
+              else if (
+                !rawTingkat &&
+                (cleanCol.includes('tingkatsekolah') ||
+                  cleanCol.includes('tingkat') ||
+                  cleanCol.includes('jenjang') ||
+                  cleanCol.includes('unit') ||
+                  cleanCol.includes('sekolah'))
+              ) {
+                rawTingkat = val;
+              }
+              // Deteksi Kolom: Jenis_Kelamin
+              else if (
+                !rawGender &&
+                (cleanCol.includes('jeniskelamin') ||
+                  cleanCol.includes('kelamin') ||
+                  cleanCol.includes('gender') ||
+                  cleanCol.includes('sex') ||
+                  cleanCol === 'jk' ||
+                  cleanCol === 'lp')
+              ) {
+                rawGender = val;
+              }
+              // Deteksi Kolom: Status_Keaktifan
+              else if (
+                !rawStatus &&
+                (cleanCol.includes('statuskeaktifan') ||
+                  cleanCol.includes('keaktifan') ||
+                  cleanCol.includes('status'))
+              ) {
+                rawStatus = val;
+              }
+              // Deteksi Tahun Ajaran
+              else if (cleanCol.includes('tahun') || cleanCol.includes('ajaran')) {
                 tahun = val || '2025/2026';
               }
             });
 
-            // Fallback for headerless row
-            if (!nama) {
+            // Fallback for headerless row (misal file tanpa baris header)
+            if (!rawNama) {
               const cols = Object.keys(row);
               if (cols.length > 0 && String(row[cols[0]]).trim()) {
-                nama = String(row[cols[0]]).trim();
-                if (cols.length > 1 && !nisn) {
-                  nisn = String(row[cols[1]]).trim();
+                const firstVal = String(row[cols[0]]).trim();
+                if (firstVal.toLowerCase() !== 'no' && firstVal.toLowerCase() !== 'nomor') {
+                  rawNama = firstVal;
+                } else if (cols.length > 1 && String(row[cols[1]]).trim()) {
+                  rawNama = String(row[cols[1]]).trim();
+                  if (cols.length > 2 && !rawNisn) rawNisn = String(row[cols[2]]).trim();
                 }
               }
             }
 
-            if (nama && nama.toLowerCase() !== 'nama' && nama.toLowerCase() !== 'nama siswa') {
-              // Priority for Class Name: Row Column > Sheet Name (if non-generic) > Active Selected Class
+            const cleanNamaLower = rawNama.toLowerCase().trim();
+            if (
+              rawNama &&
+              cleanNamaLower !== 'nama' &&
+              cleanNamaLower !== 'nama siswa' &&
+              cleanNamaLower !== 'nama lengkap santri' &&
+              cleanNamaLower !== 'nama santri' &&
+              cleanNamaLower !== 'nama_lengkap_santri'
+            ) {
+              // 1. Parsing & Normalisasi Kelas / Rombel (Memisahkan daftar santri ke rombel yang sesuai)
               let finalClassName = activeClass.nama_kelas;
-              if (rowKelas && rowKelas.length > 0) {
-                finalClassName = rowKelas;
+              if (rawKelas && rawKelas.length > 0 && rawKelas !== '-') {
+                finalClassName = rawKelas.trim();
               } else if (!isGenericSheet && cleanSheetName.length > 0) {
                 finalClassName = cleanSheetName;
               }
 
+              // 2. Validasi & Fallback NISN Unik (Cegah penimpaan entitas di Google Sheets)
+              let finalNisn = '';
+              let isFallback = false;
+              if (isValidNisn(rawNisn)) {
+                finalNisn = rawNisn.trim();
+              } else {
+                finalNisn = generateFallbackNisn(globalRowCounter++);
+                isFallback = true;
+              }
+
+              // 3. Tingkat Sekolah (SMP vs SMA)
+              const inferredUnit: SchoolUnit = rawTingkat.toUpperCase().includes('SMP')
+                ? 'SMP'
+                : rawTingkat.toUpperCase().includes('SMA')
+                ? 'SMA'
+                : getSchoolUnit(finalClassName);
+
+              // 4. Jenis Kelamin
+              const finalGender = normalizeGender(rawGender);
+
+              // 5. Status Keaktifan
+              const finalStatus = rawStatus.toLowerCase().includes('pindah')
+                ? 'Pindah'
+                : rawStatus.toLowerCase().includes('keluar')
+                ? 'Keluar'
+                : 'Aktif';
+
               aggregatedList.push({
-                nama_siswa: nama,
-                nisn: nisn || undefined,
+                nama_siswa: rawNama.trim(),
+                nisn: finalNisn,
                 nama_kelas: finalClassName,
+                tingkat_sekolah: inferredUnit,
+                jenis_kelamin: finalGender,
+                status_keaktifan: finalStatus,
                 tahun_ajaran: tahun || activeClass.tahun_ajaran || '2025/2026',
+                isNisnFallback: isFallback,
               });
             }
           });
@@ -356,7 +529,12 @@ export const StudentClassRecords: React.FC = () => {
     }));
   }, [excelParsedStudents, classes, activeClass]);
 
-  // 5. Confirm Excel Import (Hanya Admin / Kepala Lab)
+  // Count fallback NISNs generated
+  const fallbackNisnCount = useMemo(() => {
+    return excelParsedStudents.filter((s) => s.isNisnFallback).length;
+  }, [excelParsedStudents]);
+
+  // 6. Confirm Excel Import (Hanya Admin / Kepala Lab) dengan Anti Double-Submit
   const handleConfirmExcelImport = () => {
     if (!isActualAdmin) {
       showToast({
@@ -366,31 +544,38 @@ export const StudentClassRecords: React.FC = () => {
       });
       return;
     }
-    if (excelParsedStudents.length === 0) return;
+    if (excelParsedStudents.length === 0 || isImporting) return;
 
-    if (importMode === 'AUTO_MULTI') {
-      const res = importMultiClassStudents(excelParsedStudents);
-      if (res.success) {
-        setIsExcelImportModalOpen(false);
-        setExcelParsedStudents([]);
-        setExcelFileName('');
+    setIsImporting(true);
+    try {
+      if (importMode === 'AUTO_MULTI') {
+        const res = importMultiClassStudents(excelParsedStudents);
+        if (res.success) {
+          setIsExcelImportModalOpen(false);
+          setExcelParsedStudents([]);
+          setExcelFileName('');
+        } else {
+          setExcelErrorMsg(res.message);
+        }
       } else {
-        setExcelErrorMsg(res.message);
+        // Single Class Mode: forces all into active class
+        const singleList = excelParsedStudents.map((s) => ({
+          nama_siswa: s.nama_siswa,
+          nisn: s.nisn,
+          gender: s.jenis_kelamin,
+          status: s.status_keaktifan,
+        }));
+        const res = importStudentsFromExcel(Number(selectedClassId), singleList);
+        if (res.success) {
+          setIsExcelImportModalOpen(false);
+          setExcelParsedStudents([]);
+          setExcelFileName('');
+        } else {
+          setExcelErrorMsg(res.message);
+        }
       }
-    } else {
-      // Single Class Mode: forces all into active class
-      const singleList = excelParsedStudents.map((s) => ({
-        nama_siswa: s.nama_siswa,
-        nisn: s.nisn,
-      }));
-      const res = importStudentsFromExcel(Number(selectedClassId), singleList);
-      if (res.success) {
-        setIsExcelImportModalOpen(false);
-        setExcelParsedStudents([]);
-        setExcelFileName('');
-      } else {
-        setExcelErrorMsg(res.message);
-      }
+    } finally {
+      setIsImporting(false);
     }
   };
 
@@ -1171,6 +1356,20 @@ export const StudentClassRecords: React.FC = () => {
             </div>
 
             <div className="p-6 space-y-4 overflow-y-auto flex-1">
+              {/* Header Info & Template Download */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-1">
+                <span className="text-xs font-bold text-slate-700">Unggah File Excel Santri:</span>
+                <button
+                  type="button"
+                  onClick={handleDownloadStandardStudentTemplate}
+                  className="text-xs text-teal-800 hover:text-teal-900 font-bold inline-flex items-center gap-1.5 px-3 py-1.5 bg-teal-50 hover:bg-teal-100/80 border border-teal-200/80 rounded-xl transition-all cursor-pointer shadow-2xs"
+                  title="Unduh format template Excel standar 6 kolom untuk SIMLAB"
+                >
+                  <Download className="w-3.5 h-3.5 text-teal-700" />
+                  <span>Unduh Format Standar (6 Kolom)</span>
+                </button>
+              </div>
+
               {/* File Upload Area */}
               <div className="border-2 border-dashed border-slate-200 hover:border-teal-500 rounded-2xl p-6 text-center transition-colors bg-slate-50/50">
                 <input
@@ -1189,7 +1388,7 @@ export const StudentClassRecords: React.FC = () => {
                     {excelFileName ? excelFileName : 'Pilih File Excel (.xlsx / .xls / .csv)'}
                   </span>
                   <span className="text-[11px] text-slate-400">
-                    Klik untuk memilih file gabungan banyak kelas atau multi-sheet
+                    Mendukung multi-sheet dan pemisahan otomatis berdasarkan kolom 'Kelas_Rombel'
                   </span>
                 </label>
               </div>
@@ -1198,6 +1397,17 @@ export const StudentClassRecords: React.FC = () => {
                 <div className="p-3 bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 shrink-0" />
                   <span>{excelErrorMsg}</span>
+                </div>
+              )}
+
+              {/* Fallback NISN Alert Banner */}
+              {excelParsedStudents.length > 0 && fallbackNisnCount > 0 && (
+                <div className="p-3.5 bg-amber-50/90 border border-amber-200/90 text-amber-900 text-xs rounded-2xl flex items-start gap-2.5">
+                  <Sparkles className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+                  <div className="leading-relaxed">
+                    <span className="font-bold text-amber-950">Proteksi ID Unik NISN Aktif: </span>
+                    Ditemukan <strong>{fallbackNisnCount} santri</strong> dengan kolom NISN kosong atau bertanda strip (-). Sistem otomatis membuatkan ID unik khusus (contoh: <code className="bg-amber-100 text-amber-900 px-1 py-0.5 rounded font-mono text-[10.5px]">NISN-TIMESTAMP-RANDOM</code>) agar data santri tidak tertukar atau menimpa satu sama lain di Google Sheets.
+                  </div>
                 </div>
               )}
 
@@ -1222,7 +1432,7 @@ export const StudentClassRecords: React.FC = () => {
                         <div>
                           <div className="text-xs font-bold">Auto Multi-Rombel (Direkomendasikan)</div>
                           <div className="text-[10.5px] font-normal text-slate-500 mt-0.5">
-                            Otomatis pecah dan masukkan siswa ke masing-masing kelas sesuai nama sheet / kolom Kelas. Kelas baru akan dibuat otomatis jika belum ada.
+                            Otomatis memisahkan siswa ke filter kelas masing-masing berdasarkan sheet atau kolom 'Kelas_Rombel'. Rombel baru dibuat otomatis.
                           </div>
                         </div>
                       </label>
@@ -1240,9 +1450,9 @@ export const StudentClassRecords: React.FC = () => {
                           className="mt-0.5 text-teal-600 focus:ring-teal-500"
                         />
                         <div>
-                          <div className="text-xs font-bold">Hanya ke {activeClass.nama_kelas}</div>
+                          <div className="text-xs font-bold">Gabungkan ke {activeClass.nama_kelas}</div>
                           <div className="text-[10.5px] font-normal text-slate-500 mt-0.5">
-                            Paksa seluruh {excelParsedStudents.length} siswa masuk ke kelas yang sedang aktif dibuka saat ini.
+                            Paksa seluruh {excelParsedStudents.length} santri masuk ke kelas aktif yang sedang dipilih di layar saat ini.
                           </div>
                         </div>
                       </label>
@@ -1253,7 +1463,7 @@ export const StudentClassRecords: React.FC = () => {
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between text-xs font-semibold text-slate-700">
                       <span>Rombel & Kelas Terdeteksi:</span>
-                      <span className="text-teal-800 font-bold bg-teal-50 px-2 py-0.5 rounded-full border border-teal-200 text-[11px]">
+                      <span className="text-teal-800 font-bold bg-teal-50 px-2.5 py-0.5 rounded-full border border-teal-200 text-[11px]">
                         {excelParsedStudents.length} Santri · {parsedClassesSummary.length} Rombel
                       </span>
                     </div>
@@ -1273,36 +1483,76 @@ export const StudentClassRecords: React.FC = () => {
                             {cls.count} santri
                           </span>
                           {!cls.existsInDb && (
-                            <span className="text-[9px] bg-amber-500 text-white font-bold px-1 rounded">Baru</span>
+                            <span className="text-[9px] bg-amber-500 text-white font-bold px-1 rounded">Rombel Baru</span>
                           )}
                         </span>
                       ))}
                     </div>
                   </div>
 
-                  {/* Student list preview */}
+                  {/* Student list preview (6 Standard Columns) */}
                   <div className="space-y-1">
-                    <span className="text-xs font-bold text-slate-700">Pratinjau Baris Siswa (Sampel):</span>
-                    <div className="max-h-48 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100 text-xs">
-                      {excelParsedStudents.slice(0, 10).map((st, i) => (
-                        <div key={i} className="p-2.5 flex items-center justify-between gap-2 hover:bg-slate-50">
-                          <div className="flex items-center gap-2 truncate">
-                            <span className="font-mono text-slate-400 text-[10px] w-5 text-right">{i + 1}.</span>
-                            <span className="font-semibold text-slate-900 truncate">{st.nama_siswa}</span>
-                          </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <span className="font-mono text-slate-500 text-[11px] bg-slate-100 px-1.5 py-0.5 rounded">
-                              {st.nisn || '-'}
-                            </span>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 border border-teal-200">
-                              {importMode === 'AUTO_MULTI' ? st.nama_kelas : activeClass.nama_kelas}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-700">
+                      <span>Pratinjau Pemetaan Kolom (6 Field Standar):</span>
+                      <span className="text-[11px] font-normal text-slate-400">
+                        Menampilkan {Math.min(10, excelParsedStudents.length)} dari {excelParsedStudents.length} santri
+                      </span>
+                    </div>
+
+                    <div className="max-h-56 overflow-y-auto border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                      <table className="w-full text-[11px] text-left border-collapse">
+                        <thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200 sticky top-0">
+                          <tr>
+                            <th className="py-2 px-2.5 w-8 text-center">No</th>
+                            <th className="py-2 px-2.5">NISN</th>
+                            <th className="py-2 px-2.5">Nama Lengkap Santri</th>
+                            <th className="py-2 px-2.5">Tingkat</th>
+                            <th className="py-2 px-2.5">Kelas / Rombel</th>
+                            <th className="py-2 px-2.5">Gender</th>
+                            <th className="py-2 px-2.5">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {excelParsedStudents.slice(0, 10).map((st, i) => (
+                            <tr key={i} className="hover:bg-slate-50 transition-colors">
+                              <td className="py-2 px-2.5 text-center text-slate-400 font-mono text-[10px]">{i + 1}</td>
+                              <td className="py-2 px-2.5 font-mono">
+                                <span className={`px-1.5 py-0.5 rounded text-[10.5px] ${
+                                  st.isNisnFallback
+                                    ? 'bg-amber-100 text-amber-900 border border-amber-300 font-bold'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}>
+                                  {st.nisn}
+                                </span>
+                              </td>
+                              <td className="py-2 px-2.5 font-bold text-slate-800">{st.nama_siswa}</td>
+                              <td className="py-2 px-2.5">
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  st.tingkat_sekolah === 'SMP'
+                                    ? 'bg-sky-50 text-sky-800 border border-sky-200'
+                                    : 'bg-indigo-50 text-indigo-800 border border-indigo-200'
+                                }`}>
+                                  {st.tingkat_sekolah || 'SMA'}
+                                </span>
+                              </td>
+                              <td className="py-2 px-2.5">
+                                <span className="px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 border border-teal-200 font-semibold text-[10.5px]">
+                                  {importMode === 'AUTO_MULTI' ? st.nama_kelas : activeClass.nama_kelas}
+                                </span>
+                              </td>
+                              <td className="py-2 px-2.5 text-slate-600">{st.jenis_kelamin || 'Laki-laki'}</td>
+                              <td className="py-2 px-2.5">
+                                <span className="text-emerald-700 font-bold text-[10px] bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                                  {st.status_keaktifan || 'Aktif'}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                       {excelParsedStudents.length > 10 && (
-                        <div className="p-2 text-center text-slate-400 text-[11px] bg-slate-50">
-                          ... dan {excelParsedStudents.length - 10} siswa lainnya siap diimpor
+                        <div className="p-2 text-center text-slate-400 text-[11px] bg-slate-50 border-t border-slate-100 font-medium">
+                          ... dan {excelParsedStudents.length - 10} santri lainnya siap diimpor ke sistem
                         </div>
                       )}
                     </div>
@@ -1313,20 +1563,23 @@ export const StudentClassRecords: React.FC = () => {
               <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 shrink-0">
                 <button
                   type="button"
+                  disabled={isImporting}
                   onClick={() => setIsExcelImportModalOpen(false)}
-                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
                   type="button"
                   onClick={handleConfirmExcelImport}
-                  disabled={excelParsedStudents.length === 0}
-                  className="px-5 py-2.5 bg-teal-800 hover:bg-teal-900 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5"
+                  disabled={excelParsedStudents.length === 0 || isImporting}
+                  className="px-5 py-2.5 bg-teal-800 hover:bg-teal-900 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
                 >
                   <Check className="w-4 h-4" />
                   <span>
-                    Impor {excelParsedStudents.length > 0 ? `(${excelParsedStudents.length} Siswa)` : 'Sekarang'}
+                    {isImporting
+                      ? 'Menyimpan ke Database...'
+                      : `Impor ${excelParsedStudents.length > 0 ? `(${excelParsedStudents.length} Santri)` : 'Sekarang'}`}
                   </span>
                 </button>
               </div>

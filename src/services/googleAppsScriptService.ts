@@ -957,18 +957,69 @@ export const mapGasRowToUser = (row: Record<string, any>): UserAccount | null =>
 };
 
 /**
+ * Validate NISN value: Checks if valid number string and not empty/dash/null
+ */
+export const isValidNisn = (val: any): boolean => {
+  if (val === undefined || val === null) return false;
+  const str = String(val).trim();
+  if (!str || str === '-' || str === '—' || str === '--' || str === 'null' || str === 'undefined' || str === '0') {
+    return false;
+  }
+  return true;
+};
+
+/**
+ * Generate a deterministic unique NISN fallback identifier
+ * Format: NISN-<timestamp>-<padded-index>-<random>
+ */
+export const generateFallbackNisn = (seedIndex: number = 1): string => {
+  const timestamp = Date.now().toString().slice(-6);
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `NISN-${timestamp}-${String(seedIndex).padStart(3, '0')}-${rand}`;
+};
+
+/**
+ * Normalize Gender representation to 'Laki-laki' or 'Perempuan'
+ */
+export const normalizeGender = (val: any): 'Laki-laki' | 'Perempuan' => {
+  if (!val) return 'Laki-laki';
+  const s = String(val).toLowerCase().trim();
+  if (s === 'p' || s.startsWith('per') || s.includes('wanita') || s === 'f' || s === 'female') {
+    return 'Perempuan';
+  }
+  return 'Laki-laki';
+};
+
+/**
  * Map LabStudent to Data_Siswa row in Google Sheets
+ * Uses exact headers: NISN, Nama_Lengkap_Santri, Tingkat_Sekolah, Kelas_Rombel, Jenis_Kelamin, Status_Keaktifan
  */
 export const mapStudentToGasPayload = (
   student: LabStudent,
   className?: string
 ): Record<string, any> => {
+  const nisn = isValidNisn(student.nisn)
+    ? String(student.nisn).trim()
+    : generateFallbackNisn(student.id || 1);
+
+  const rawUnit = student.unit || (className && className.toUpperCase().includes('SMP') ? 'SMP' : 'SMA');
+  const gender = normalizeGender(student.gender);
+  const statusKeaktifan =
+    student.status === 'pindah' ? 'Pindah' : student.status === 'keluar' ? 'Keluar' : 'Aktif';
+
   return {
+    id: nisn, // Primary Key for Apps Script Column A UPSERT
+    NISN: nisn,
+    Nama_Lengkap_Santri: student.nama_siswa.trim(),
+    Tingkat_Sekolah: rawUnit,
+    Kelas_Rombel: className?.trim() || '-',
+    Jenis_Kelamin: gender,
+    Status_Keaktifan: statusKeaktifan,
+    // Aliases for backward compatibility with existing components
     ID_Siswa: String(student.id),
-    NISN: student.nisn || '-',
-    Nama_Siswa: student.nama_siswa,
-    Kelas: className || '-',
-    Status: student.status || 'Aktif',
+    Nama_Siswa: student.nama_siswa.trim(),
+    Kelas: className?.trim() || '-',
+    Status: statusKeaktifan,
   };
 };
 
@@ -978,16 +1029,35 @@ export const mapStudentToGasPayload = (
 export const mapGasRowToStudent = (
   row: Record<string, any>,
   index: number
-): LabStudent | null => {
-  const name = String(row.Nama_Siswa || '').trim();
+): (LabStudent & { raw_kelas_rombel?: string }) | null => {
+  const name = String(row.Nama_Lengkap_Santri || row.Nama_Siswa || row.nama || '').trim();
   if (!name) return null;
+
+  const rawNisn = row.NISN || row.nisn;
+  const nisn = isValidNisn(rawNisn) ? String(rawNisn).trim() : generateFallbackNisn(index + 1);
+
+  const rawKelas = String(row.Kelas_Rombel || row.Kelas || row.kelas || '').trim();
+  const rawUnit = String(
+    row.Tingkat_Sekolah || row.unit || (rawKelas.toUpperCase().includes('SMP') ? 'SMP' : 'SMA')
+  ).toUpperCase();
+  const unit = rawUnit.includes('SMP') ? 'SMP' : 'SMA';
+
+  const rawStatus = String(row.Status_Keaktifan || row.Status || row.status || 'Aktif').toLowerCase();
+  const status: any = rawStatus.includes('pindah')
+    ? 'pindah'
+    : rawStatus.includes('keluar')
+    ? 'keluar'
+    : 'aktif';
 
   return {
     id: Number(row.ID_Siswa) || index + 100,
     nama_siswa: name,
-    kelas_id: 1,
-    nisn: String(row.NISN || ''),
-    status: (row.Status as any) || 'Aktif',
+    kelas_id: 1, // Will be dynamically resolved by class name in InventoryContext
+    nisn,
+    unit,
+    gender: normalizeGender(row.Jenis_Kelamin || row.gender),
+    status,
+    raw_kelas_rombel: rawKelas || undefined,
     created_at: new Date().toISOString(),
   };
 };
@@ -1138,6 +1208,34 @@ export const syncStudentToGas = (
   saveSheetData('Data_Siswa', row, apiUrl).catch((err) => {
     console.warn(`[GAS] Background sync student failed for ${student.nama_siswa}:`, err);
   });
+};
+
+/**
+ * Asynchronously sync an entire batch of students to Google Sheets (Data_Siswa) in background
+ */
+export const syncBatchStudentsToGas = (
+  studentsWithClass: Array<{ student: LabStudent; className?: string }>,
+  apiUrl: string = getGasApiUrl()
+): Promise<boolean> => {
+  if (!studentsWithClass || studentsWithClass.length === 0) {
+    return Promise.resolve(true);
+  }
+  const rows = studentsWithClass.map(({ student, className }) =>
+    mapStudentToGasPayload(student, className)
+  );
+
+  return saveSheetData('Data_Siswa', rows, apiUrl)
+    .then((res) => {
+      if (!res.success) {
+        console.warn('[GAS] Batch sync students returned unsuccessful:', res.message);
+        return false;
+      }
+      return true;
+    })
+    .catch((err) => {
+      console.warn('[GAS] Background batch sync students failed:', err);
+      return false;
+    });
 };
 
 /**

@@ -33,6 +33,7 @@ import {
   CalibrationRecord,
   CalibrationResult,
   CalibrationStatus,
+  ParsedExcelStudent,
 } from '../types/inventory';
 import { getSchoolUnit } from '../utils/helpers';
 import { ExcelImportSummary, ExcelImportExecutionResult, DetectedLaboranUser } from '../types/excelImport';
@@ -61,6 +62,10 @@ import {
   syncUserToGas,
   syncDeleteUserFromGas,
   syncStudentToGas,
+  syncBatchStudentsToGas,
+  isValidNisn,
+  generateFallbackNisn,
+  normalizeGender,
   syncDeleteStudentFromGas,
   syncLoanToGas,
   syncDeleteLoanFromGas,
@@ -253,13 +258,13 @@ interface InventoryContextType {
   wipeOutAllLabActivities: () => { success: boolean; message: string };
   addLabClass: (nama_kelas: string, tahun_ajaran: string, unit?: SchoolUnit) => { success: boolean; message: string; newClass?: LabClass };
   addLabStudent: (kelas_id: number, nama_siswa: string, nisn?: string) => { success: boolean; message: string; newStudent?: LabStudent };
-  importStudentsFromExcel: (kelas_id: number, studentsList: Array<{ nama_siswa: string; nisn?: string }>) => { success: boolean; message: string; count: number };
+  importStudentsFromExcel: (kelas_id: number, studentsList: Array<{ nama_siswa: string; nisn?: string; gender?: string; status?: string }>) => { success: boolean; message: string; count: number };
   updateLabStudent: (id: number | string, updates: { nama_siswa?: string; nisn?: string; status?: StudentStatus; status_keterangan?: string }) => { success: boolean; message: string };
   updateStudentStatus: (id: number | string, status: StudentStatus, keterangan?: string) => { success: boolean; message: string };
   deleteLabStudent: (id: number | string) => { success: boolean; message: string };
   deleteLabClass: (classId: number | string) => { success: boolean; message: string };
   importMultiClassStudents: (
-    records: Array<{ nama_siswa: string; nisn?: string; nama_kelas: string; tahun_ajaran?: string }>
+    records: ParsedExcelStudent[]
   ) => { success: boolean; message: string; count: number; classesCount: number };
   isAdmin: boolean;
   isGuru: boolean;
@@ -772,16 +777,66 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
             });
           }
 
-          // 6. Hydrate Data_Siswa
+          // 6. Hydrate Data_Siswa (Pemisahan Kelas & Rombel Presisi)
           if (res.students.length > 0) {
-            setStudents((prevStudents) => {
-              const stdMap = new Map(prevStudents.map((s) => [s.id, s]));
-              res.students.forEach((remote) => {
-                if (!stdMap.has(remote.id)) {
-                  stdMap.set(remote.id, remote);
+            setClasses((prevClasses) => {
+              const updatedClasses = [...prevClasses];
+              let nextClassId = updatedClasses.length > 0 ? Math.max(...updatedClasses.map((c) => c.id)) + 1 : 1;
+              const classLookup = new Map<string, number>();
+              updatedClasses.forEach((c) => classLookup.set(c.nama_kelas.toLowerCase().trim(), c.id));
+
+              // Auto-register any new rombel from remote Data_Siswa
+              res.students.forEach((remote: any) => {
+                const rombelName = (remote.raw_kelas_rombel || '').trim();
+                if (rombelName && rombelName !== '-') {
+                  const key = rombelName.toLowerCase();
+                  if (!classLookup.has(key)) {
+                    const cId = nextClassId++;
+                    const unit = remote.unit || getSchoolUnit(rombelName);
+                    const newCls: LabClass = {
+                      id: cId,
+                      nama_kelas: rombelName,
+                      tahun_ajaran: '2025/2026',
+                      unit,
+                      created_at: new Date().toISOString(),
+                    };
+                    updatedClasses.push(newCls);
+                    classLookup.set(key, cId);
+                  }
                 }
               });
-              return Array.from(stdMap.values());
+
+              // Map students with their respective kelas_id
+              setStudents((prevStudents) => {
+                const stdMap = new Map(prevStudents.map((s) => [s.id, s]));
+                const nisnMap = new Map(
+                  prevStudents.filter((s) => s.nisn && isValidNisn(s.nisn)).map((s) => [s.nisn!, s])
+                );
+
+                res.students.forEach((remote: any) => {
+                  const rombelName = (remote.raw_kelas_rombel || '').trim();
+                  let targetClassId = 1;
+                  if (rombelName && rombelName !== '-') {
+                    targetClassId = classLookup.get(rombelName.toLowerCase()) || 1;
+                  }
+
+                  const studentWithClass: LabStudent = {
+                    ...remote,
+                    kelas_id: targetClassId,
+                  };
+
+                  if (remote.nisn && isValidNisn(remote.nisn) && nisnMap.has(remote.nisn)) {
+                    const existing = nisnMap.get(remote.nisn)!;
+                    stdMap.set(existing.id, { ...existing, ...studentWithClass, id: existing.id });
+                  } else if (!stdMap.has(remote.id)) {
+                    stdMap.set(remote.id, studentWithClass);
+                  }
+                });
+
+                return Array.from(stdMap.values());
+              });
+
+              return updatedClasses;
             });
           }
 
@@ -1232,11 +1287,17 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     const nextId = students.length > 0 ? Math.max(...students.map((s) => s.id)) + 1 : 1;
+    const cleanNisn = isValidNisn(nisn) ? nisn!.trim() : generateFallbackNisn(nextId);
+    const matchedClass = classes.find((c) => c.id === Number(kelas_id));
+    const unit = matchedClass ? getSchoolUnit(matchedClass.nama_kelas, matchedClass.unit) : 'SMA';
+
     const newStudentItem: LabStudent = {
       id: nextId,
       nama_siswa: nama_siswa.trim(),
       kelas_id: Number(kelas_id),
-      nisn: nisn?.trim() || `007${String(nextId).padStart(7, '0')}`,
+      nisn: cleanNisn,
+      unit,
+      status: 'aktif',
       created_at: new Date().toISOString(),
     };
 
@@ -1245,7 +1306,6 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     localStorage.setItem(STORAGE_KEY_LAB_STUDENTS, JSON.stringify(nextStudents));
 
     // Real-time synchronization to Google Sheets (Data_Siswa)
-    const matchedClass = classes.find((c) => c.id === Number(kelas_id));
     syncStudentToGas(newStudentItem, matchedClass?.nama_kelas);
 
     showToast({
@@ -1261,10 +1321,10 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     };
   };
 
-  // 5. Import Siswa dari Excel
+  // 5. Import Siswa dari Excel (Rombel Tunggal)
   const importStudentsFromExcel = (
     kelas_id: number,
-    studentsList: Array<{ nama_siswa: string; nisn?: string }>
+    studentsList: Array<{ nama_siswa: string; nisn?: string; gender?: string; status?: string }>
   ): { success: boolean; message: string; count: number } => {
     if (!isAdmin) {
       const errMsg = 'Akses Ditolak: Fitur import data siswa hanya kewenangan Admin (Kepala Lab). Akun Laboran dan Guru bersifat Read-Only.';
@@ -1277,23 +1337,38 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return { success: false, message: 'Tidak ada baris data siswa yang valid ditemukan dalam file Excel.', count: 0 };
     }
 
+    const matchedClass = classes.find((c) => c.id === Number(kelas_id));
+    const unit = matchedClass ? getSchoolUnit(matchedClass.nama_kelas, matchedClass.unit) : 'SMA';
+
     let startId = students.length > 0 ? Math.max(...students.map((s) => s.id)) + 1 : 1;
-    const newItems: LabStudent[] = validList.map((s) => ({
-      id: startId++,
-      nama_siswa: s.nama_siswa.trim(),
-      kelas_id: Number(kelas_id),
-      nisn: s.nisn?.trim() || `007${String(startId).padStart(7, '0')}`,
-      created_at: new Date().toISOString(),
-    }));
+    const newItems: LabStudent[] = validList.map((s, idx) => {
+      const cleanNisn = isValidNisn(s.nisn) ? s.nisn!.trim() : generateFallbackNisn(startId + idx);
+      const gender = normalizeGender(s.gender);
+      return {
+        id: startId++,
+        nama_siswa: s.nama_siswa.trim(),
+        kelas_id: Number(kelas_id),
+        nisn: cleanNisn,
+        unit,
+        gender,
+        status: 'aktif' as const,
+        created_at: new Date().toISOString(),
+      };
+    });
 
     const nextStudents = [...students, ...newItems];
     setStudents(nextStudents);
     localStorage.setItem(STORAGE_KEY_LAB_STUDENTS, JSON.stringify(nextStudents));
 
+    // Real-time synchronization to Google Sheets (Data_Siswa) with complete 6 headers
+    syncBatchStudentsToGas(
+      newItems.map((st) => ({ student: st, className: matchedClass?.nama_kelas }))
+    );
+
     showToast({
       type: 'success',
       title: 'Import Siswa Berhasil',
-      message: `Berhasil mengimpor ${newItems.length} siswa ke rombel terpilih dari Excel.`,
+      message: `Berhasil mengimpor ${newItems.length} siswa ke rombel ${matchedClass?.nama_kelas || ''} dari Excel.`,
       duration: 5000,
     });
 
@@ -1520,7 +1595,7 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   // 9. Import Siswa Multi-Halaman / Multi-Rombel (Otomatis deteksi & pecah ke masing-masing kelas)
   const importMultiClassStudents = (
-    records: Array<{ nama_siswa: string; nisn?: string; nama_kelas: string; tahun_ajaran?: string }>
+    records: ParsedExcelStudent[]
   ): { success: boolean; message: string; count: number; classesCount: number } => {
     if (!isAdmin) {
       const errMsg = 'Akses Ditolak: Hanya Admin (Kepala Lab) yang berwenang mengimpor data siswa multi-rombel.';
@@ -1529,13 +1604,13 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     const validRecords = records.filter(
-      (r) => r.nama_siswa && r.nama_siswa.trim().length > 0 && r.nama_kelas && r.nama_kelas.trim().length > 0
+      (r) => r.nama_siswa && r.nama_siswa.trim().length > 0
     );
 
     if (validRecords.length === 0) {
       return {
         success: false,
-        message: 'Tidak ada baris data siswa dan kelas yang valid ditemukan dalam file Excel.',
+        message: 'Tidak ada baris data siswa yang valid ditemukan dalam file Excel.',
         count: 0,
         classesCount: 0,
       };
@@ -1553,31 +1628,65 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     let newClassesCreated = 0;
     const newStudentsToAdd: LabStudent[] = [];
+    const studentsWithClassForGas: Array<{ student: LabStudent; className: string }> = [];
 
-    validRecords.forEach((rec) => {
-      const normClassName = rec.nama_kelas.trim();
+    validRecords.forEach((rec, idx) => {
+      // 1. Parsing & Normalisasi Rombel / Kelas
+      const rawClassName = (rec.nama_kelas || '').trim();
+      const normClassName = rawClassName && rawClassName !== '-' ? rawClassName : 'Kelas Umum';
       const key = normClassName.toLowerCase();
 
       let targetClassId = classMap.get(key);
+      let detectedUnit = rec.tingkat_sekolah || getSchoolUnit(normClassName);
+
       if (!targetClassId) {
         targetClassId = nextClassId++;
         const newClass: LabClass = {
           id: targetClassId,
           nama_kelas: normClassName,
           tahun_ajaran: rec.tahun_ajaran?.trim() || '2025/2026',
+          unit: detectedUnit,
           created_at: new Date().toISOString(),
         };
         currentClasses.push(newClass);
         classMap.set(key, targetClassId);
         newClassesCreated++;
+      } else {
+        const found = currentClasses.find((c) => c.id === targetClassId);
+        if (found) {
+          detectedUnit = found.unit || detectedUnit;
+        }
       }
 
-      newStudentsToAdd.push({
+      // 2. Validasi & Fallback NISN (Mencegah collision di Google Sheets)
+      const validNisn = isValidNisn(rec.nisn)
+        ? String(rec.nisn).trim()
+        : generateFallbackNisn(nextStudentId + idx);
+
+      // 3. Normalisasi Gender & Status
+      const gender = normalizeGender(rec.jenis_kelamin);
+      const rawStatus = (rec.status_keaktifan || 'aktif').toLowerCase();
+      const studentStatus: StudentStatus = rawStatus.includes('pindah')
+        ? 'pindah'
+        : rawStatus.includes('keluar')
+        ? 'keluar'
+        : 'aktif';
+
+      const studentItem: LabStudent = {
         id: nextStudentId++,
         nama_siswa: rec.nama_siswa.trim(),
         kelas_id: targetClassId,
-        nisn: rec.nisn?.trim() || '007' + String(nextStudentId).padStart(7, '0'),
+        nisn: validNisn,
+        unit: detectedUnit,
+        gender,
+        status: studentStatus,
         created_at: new Date().toISOString(),
+      };
+
+      newStudentsToAdd.push(studentItem);
+      studentsWithClassForGas.push({
+        student: studentItem,
+        className: normClassName,
       });
     });
 
@@ -1590,16 +1699,19 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       localStorage.setItem(STORAGE_KEY_LAB_STUDENTS, JSON.stringify(finalStudents));
     } catch {}
 
+    // Real-time synchronization to Google Sheets (Data_Siswa) with complete 6 headers
+    syncBatchStudentsToGas(studentsWithClassForGas);
+
     showToast({
       type: 'success',
       title: 'Import Multi-Rombel Sukses',
-      message: 'Berhasil memetakan ' + newStudentsToAdd.length + ' siswa ke ' + classMap.size + ' rombel (' + newClassesCreated + ' rombel baru dibuat).',
+      message: `Berhasil memetakan ${newStudentsToAdd.length} santri ke ${classMap.size} rombel (${newClassesCreated} rombel baru dibuat). Data tersinkronisasi ke Google Sheets.`,
       duration: 6000,
     });
 
     return {
       success: true,
-      message: 'Berhasil mengimpor ' + newStudentsToAdd.length + ' siswa ke rombel masing-masing.',
+      message: `Berhasil mengimpor ${newStudentsToAdd.length} siswa ke rombel masing-masing.`,
       count: newStudentsToAdd.length,
       classesCount: classMap.size,
     };

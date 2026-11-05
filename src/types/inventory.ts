@@ -331,9 +331,22 @@ export interface LabStudent {
   nama_siswa: string;
   kelas_id: number;
   nisn?: string;
+  unit?: SchoolUnit;
+  gender?: 'Laki-laki' | 'Perempuan' | string;
   status?: StudentStatus;
   status_keterangan?: string;
   created_at?: string;
+}
+
+export interface ParsedExcelStudent {
+  nama_siswa: string;
+  nisn?: string;
+  nama_kelas: string;
+  tingkat_sekolah?: SchoolUnit;
+  jenis_kelamin?: 'Laki-laki' | 'Perempuan';
+  status_keaktifan?: string;
+  tahun_ajaran?: string;
+  isNisnFallback?: boolean;
 }
 
 export type StudentAttendanceStatus = 'Hadir' | 'Sakit' | 'Izin' | 'Alpa';
