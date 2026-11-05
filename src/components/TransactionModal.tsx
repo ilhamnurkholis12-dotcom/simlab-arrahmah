@@ -30,8 +30,11 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
   const [notes, setNotes] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   useEffect(() => {
     if (isOpen) {
+      setIsSubmitting(false);
       if (selectedItem) {
         setItemId(selectedItem.id);
         const lab = selectedItem.primaryLab === 'ALL' ? 'FISIKA' : selectedItem.primaryLab;
@@ -59,6 +62,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     e.preventDefault();
     setErrorMsg('');
 
+    if (isSubmitting) return;
+
     if (!itemId) {
       const msg = 'Pilih barang terlebih dahulu.';
       setErrorMsg(msg);
@@ -71,6 +76,8 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
       showToast({ type: 'warning', title: 'Kuantitas Tidak Valid', message: msg });
       return;
     }
+
+    setIsSubmitting(true);
 
     const result = addTransaction({
       itemId,
@@ -88,6 +95,7 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
     if (result.success) {
       onClose();
     } else {
+      setIsSubmitting(false);
       setErrorMsg(result.message);
     }
   };
@@ -327,19 +335,21 @@ export const TransactionModal: React.FC<TransactionModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[44px] px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors"
+              disabled={isSubmitting}
+              className="min-h-[44px] px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors disabled:opacity-50"
             >
               Batal
             </button>
             <button
               type="submit"
-              className={`min-h-[44px] px-5 py-2 text-white font-bold rounded-lg transition-colors shadow-xs ${
+              disabled={isSubmitting}
+              className={`min-h-[44px] px-5 py-2 text-white font-bold rounded-lg transition-colors shadow-xs cursor-pointer disabled:cursor-not-allowed disabled:opacity-60 ${
                 type === 'IN'
                   ? 'bg-emerald-800 hover:bg-emerald-900'
                   : 'bg-amber-700 hover:bg-amber-800'
               }`}
             >
-              Simpan Transaksi {type === 'IN' ? 'Masuk' : 'Keluar'}
+              {isSubmitting ? 'Menyimpan...' : `Simpan Transaksi ${type === 'IN' ? 'Masuk' : 'Keluar'}`}
             </button>
           </div>
         </form>

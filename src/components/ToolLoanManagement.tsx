@@ -160,11 +160,17 @@ export const ToolLoanManagement: React.FC = () => {
     setExpectedReturnDate(new Date().toISOString().slice(0, 10));
     setPurpose('');
     setLoanNotes('');
+    setIsSubmittingLoan(false);
     setIsAddModalOpen(true);
   };
 
+  const [isSubmittingLoan, setIsSubmittingLoan] = useState(false);
+  const [isSubmittingReturn, setIsSubmittingReturn] = useState(false);
+
   const handleSubmitAddLoan = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingLoan) return;
+
     if (!currentSelectedItem) {
       showToast({ title: 'Validasi Gagal', message: 'Pilih alat praktikum yang valid.', type: 'warning' });
       return;
@@ -177,6 +183,8 @@ export const ToolLoanManagement: React.FC = () => {
       showToast({ title: 'Validasi Gagal', message: 'Jumlah peminjaman minimal 1 unit.', type: 'warning' });
       return;
     }
+
+    setIsSubmittingLoan(true);
 
     addToolLoan({
       itemId: currentSelectedItem.id,
@@ -207,11 +215,13 @@ export const ToolLoanManagement: React.FC = () => {
     setDamageIncidentReport('');
     setActionTaken('');
     setReturnNotes('');
+    setIsSubmittingReturn(false);
   };
 
   const handleSubmitReturn = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!returningLoan) return;
+    if (!returningLoan || isSubmittingReturn) return;
+    setIsSubmittingReturn(true);
 
     returnToolLoan(returningLoan.id, {
       actualReturnDate,
@@ -1009,15 +1019,17 @@ export const ToolLoanManagement: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl transition-colors"
+                  disabled={isSubmittingLoan}
+                  className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl transition-colors disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 text-white font-bold rounded-xl shadow-xs transition-all"
+                  disabled={isSubmittingLoan}
+                  className="px-5 py-2 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 disabled:opacity-60 text-white font-bold rounded-xl shadow-xs transition-all cursor-pointer disabled:cursor-not-allowed"
                 >
-                  Simpan Peminjaman
+                  {isSubmittingLoan ? 'Menyimpan...' : 'Simpan Peminjaman'}
                 </button>
               </div>
             </form>
@@ -1211,15 +1223,17 @@ export const ToolLoanManagement: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setReturningLoan(null)}
-                  className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl transition-colors"
+                  disabled={isSubmittingReturn}
+                  className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl transition-colors disabled:opacity-50"
                 >
                   Batal
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 text-white font-bold rounded-xl shadow-xs transition-all"
+                  disabled={isSubmittingReturn}
+                  className="px-5 py-2 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 disabled:opacity-60 text-white font-bold rounded-xl shadow-xs transition-all cursor-pointer disabled:cursor-not-allowed"
                 >
-                  Simpan Pengembalian
+                  {isSubmittingReturn ? 'Menyimpan...' : 'Simpan Pengembalian'}
                 </button>
               </div>
             </form>

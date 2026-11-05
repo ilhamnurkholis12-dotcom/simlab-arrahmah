@@ -29,6 +29,8 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
   const [phone, setPhone] = useState(currentUser?.phone || '');
   const [errorMsg, setErrorMsg] = useState('');
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   if (!isOpen || !currentUser) return null;
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -65,10 +67,14 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     if (!name.trim()) {
       setErrorMsg('Nama lengkap tidak boleh kosong.');
       return;
     }
+
+    setIsSubmitting(true);
 
     // Save photo
     if (previewPhoto !== undefined) {
@@ -251,16 +257,18 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({ isOpen, onCl
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl transition-colors"
+              disabled={isSubmitting}
+              className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl transition-colors disabled:opacity-50"
             >
               Batal
             </button>
             <button
               type="submit"
-              className="px-5 py-2 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 text-white font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5"
+              disabled={isSubmitting}
+              className="px-5 py-2 bg-gradient-to-r from-teal-700 to-emerald-700 hover:from-teal-800 hover:to-emerald-800 disabled:opacity-60 text-white font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:cursor-not-allowed"
             >
               <Check className="w-4 h-4" />
-              <span>Simpan Perubahan</span>
+              <span>{isSubmitting ? 'Menyimpan...' : 'Simpan Perubahan'}</span>
             </button>
           </div>
         </form>

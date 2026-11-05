@@ -210,12 +210,29 @@ export const fetchSheetData = async <T = any>(
 };
 
 /**
+ * Mengambil nama header Primary Key (Kolom A) resmi berdasarkan nama sheet
+ */
+export const getSheetPrimaryKeyHeader = (sheetName: string): string => {
+  const clean = sheetName.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (clean === 'pengguna' || clean === 'users' || clean === 'user' || clean === 'petugas') return 'ID_Pengguna';
+  if (clean === 'alat' || clean === 'stokalat' || clean === 'inventarisalat') return 'ID_Barang';
+  if (clean === 'bahan' || clean === 'bahankimia' || clean === 'reagen' || clean === 'stokbahan') return 'ID_Bahan';
+  if (clean === 'peminjaman' || clean === 'peminjamanalat' || clean === 'pinjam') return 'ID_Pinjam';
+  if (clean === 'penggunaanbahan' || clean === 'transaksibahan' || clean === 'transaksi' || clean === 'pemakaian') return 'ID_Transaksi';
+  if (clean === 'slideshow' || clean === 'informasi' || clean === 'banner' || clean === 'slides') return 'ID_Slide';
+  if (clean.includes('jurnal') || clean.includes('praktikum')) return 'ID_Jurnal';
+  if (clean.includes('siswa') || clean.includes('santri')) return 'NISN';
+  if (clean.includes('rap')) return 'ID_Nilai';
+  return 'ID_Barang';
+};
+
+/**
  * In-Flight Request Deduplicator:
  * Mencegah pengiriman request POST ganda (double-post) saat tombol submit atau sinkronisasi diklik berulang kali.
  */
 const inFlightPostRequests = new Map<string, Promise<{ success: boolean; message: string }>>();
 
-const getRecordIdentifier = (dataRecord: Record<string, any>): string => {
+export const getRecordIdentifier = (dataRecord: Record<string, any>): string => {
   if (!dataRecord || typeof dataRecord !== 'object') return '';
   const val =
     dataRecord.id ||
@@ -238,29 +255,92 @@ const getRecordIdentifier = (dataRecord: Record<string, any>): string => {
 
 /**
  * Save / Upsert data (POST) to a specific sheet in Google Sheets
- * Uses UPSERT logic (overwrites if ID exists, appends if new) to prevent duplicate rows.
- * Uses text/plain Content-Type to avoid browser CORS preflight blocks.
+ * 100% Anti-Duplikasi:
+ * - Mengirim hanya objek data yang diubah/ditambah (bukan array mentah duplikat).
+ * - Wajib menyertakan properti ID (baik `id` maupun nama Primary Key kolom A seperti ID_Pengguna/ID_Barang).
+ * - Menolak double-click request yang sedang berjalan.
  */
 export const saveSheetData = async (
   sheetName: GasSheetName,
-  dataRecord: Record<string, any>,
+  dataRecord: Record<string, any> | Record<string, any>[],
   apiUrl: string = getGasApiUrl()
 ): Promise<{ success: boolean; message: string }> => {
-  const recordId = getRecordIdentifier(dataRecord);
-  const dedupeKey = `upsert:${sheetName}:${recordId || JSON.stringify(dataRecord)}`;
+  const pkHeader = getSheetPrimaryKeyHeader(sheetName);
 
-  // Cegah double-post jika request dengan ID yang sama sedang aktif berjalan
-  if (recordId && inFlightPostRequests.has(dedupeKey)) {
+  // 1. Penanganan jika payload berupa Array (misal batch sinkronisasi):
+  // Pastikan array telah dideduplikasi berdasarkan ID unik sebelum dikirim ke backend
+  if (Array.isArray(dataRecord)) {
+    const seenIds = new Set<string>();
+    const sanitizedArray: Record<string, any>[] = [];
+
+    for (const item of dataRecord) {
+      if (!item || typeof item !== 'object') continue;
+      const itemId = getRecordIdentifier(item) || `REC-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      const cleanKey = itemId.toLowerCase();
+      if (!seenIds.has(cleanKey)) {
+        seenIds.add(cleanKey);
+        sanitizedArray.push({
+          ...item,
+          id: itemId,
+          [pkHeader]: item[pkHeader] || itemId,
+        });
+      }
+    }
+
+    if (sanitizedArray.length === 0) {
+      return { success: true, message: 'Tidak ada data baru untuk dikirim.' };
+    }
+
+    try {
+      const payload = {
+        action: 'upsert',
+        sheet: sheetName,
+        data: sanitizedArray,
+      };
+
+      const res = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        return { success: false, message: `HTTP ${res.status}: Gagal menyimpan batch ke sheet ${sheetName}.` };
+      }
+      const json = await res.json();
+      return { success: json.status === 'success', message: json.message || `Data berhasil disimpan ke sheet ${sheetName}.` };
+    } catch (err: any) {
+      return { success: false, message: `Gagal mengirim batch ke sheet ${sheetName}: ${err.message || 'Kesalahan jaringan'}` };
+    }
+  }
+
+  // 2. Penanganan Objek Tunggal (Single Data Record - Kasus Form Simpan / Edit)
+  const rawId = getRecordIdentifier(dataRecord);
+  const fallbackId = `REC-${Date.now()}`;
+  const effectiveId = rawId || fallbackId;
+
+  // Pastikan ID wajib ada di dalam objek data dan di root payload
+  const normalizedData: Record<string, any> = {
+    ...dataRecord,
+    id: effectiveId,
+    [pkHeader]: dataRecord[pkHeader] || effectiveId,
+  };
+
+  const dedupeKey = `upsert:${sheetName}:${effectiveId}`;
+
+  // Cegah double-post / double-click jika request dengan ID yang sama sedang aktif berjalan
+  if (inFlightPostRequests.has(dedupeKey)) {
     return inFlightPostRequests.get(dedupeKey)!;
   }
 
   const executionPromise = (async () => {
     try {
-      const payload = {
+      const payload: Record<string, any> = {
         action: 'upsert', // Meminta UPSERT aman anti-duplikasi
         sheet: sheetName,
-        id: recordId || undefined,
-        data: dataRecord,
+        id: effectiveId,
+        [pkHeader]: effectiveId,
+        data: normalizedData, // HANYA mengirimkan objek tunggal yang sedang ditambah/diubah
       };
 
       const res = await fetch(apiUrl, {
@@ -286,13 +366,19 @@ export const saveSheetData = async (
         };
       }
 
-      // Try fallback for E_Rapot -> E_Raport
+      // Fallback for E_Rapot -> E_Raport
       if (sheetName === 'E_Rapot' && json.status === 'error') {
         try {
           const fbRes = await fetch(apiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-            body: JSON.stringify({ action: 'upsert', sheet: 'E_Raport', id: recordId || undefined, data: dataRecord }),
+            body: JSON.stringify({
+              action: 'upsert',
+              sheet: 'E_Raport',
+              id: effectiveId,
+              [getSheetPrimaryKeyHeader('E_Raport')]: effectiveId,
+              data: normalizedData,
+            }),
           });
           const fbJson = await fbRes.json();
           if (fbJson.status === 'success') {
@@ -313,16 +399,14 @@ export const saveSheetData = async (
         message: `Gagal mengirim data ke sheet ${sheetName}: ${err.message || 'Kesalahan jaringan'}`,
       };
     } finally {
-      if (recordId) {
+      // Pertahankan lock selama 500ms untuk menepis multi-click cepat pada browser
+      setTimeout(() => {
         inFlightPostRequests.delete(dedupeKey);
-      }
+      }, 500);
     }
   })();
 
-  if (recordId) {
-    inFlightPostRequests.set(dedupeKey, executionPromise);
-  }
-
+  inFlightPostRequests.set(dedupeKey, executionPromise);
   return executionPromise;
 };
 
@@ -337,6 +421,7 @@ export const updateSheetData = async (
   apiUrl: string = getGasApiUrl()
 ): Promise<{ success: boolean; message: string }> => {
   const cleanId = String(targetId).trim();
+  const pkHeader = getSheetPrimaryKeyHeader(sheetName);
   const dedupeKey = `update:${sheetName}:${cleanId}`;
 
   // Cegah double-post update jika request update dengan ID sama sedang berjalan
@@ -344,13 +429,20 @@ export const updateSheetData = async (
     return inFlightPostRequests.get(dedupeKey)!;
   }
 
+  const normalizedData: Record<string, any> = {
+    ...dataRecord,
+    id: cleanId,
+    [pkHeader]: dataRecord[pkHeader] || cleanId,
+  };
+
   const executionPromise = (async () => {
     try {
       const payload = {
         action: 'update',
         sheet: sheetName,
         id: cleanId,
-        data: { ...dataRecord, id: cleanId },
+        [pkHeader]: cleanId,
+        data: normalizedData, // HANYA mengirimkan 1 objek tunggal yang sedang diedit
       };
 
       const res = await fetch(apiUrl, {
@@ -379,9 +471,9 @@ export const updateSheetData = async (
         message: `Gagal memperbarui data di sheet ${sheetName}: ${err.message || 'Kesalahan jaringan'}`,
       };
     } finally {
-      if (cleanId) {
+      setTimeout(() => {
         inFlightPostRequests.delete(dedupeKey);
-      }
+      }, 500);
     }
   })();
 
@@ -482,11 +574,14 @@ export const batchSaveSheetData = async (
 export const mapItemToGasPayload = (
   item: InventoryItem
 ): { targetSheet: 'Alat' | 'Bahan'; row: Record<string, any> } => {
+  const primaryId = String(item.code || item.id).trim();
+
   if (item.category === 'Bahan Kimia & Reagen') {
     return {
       targetSheet: 'Bahan',
       row: {
-        ID_Bahan: item.code || item.id,
+        id: primaryId,
+        ID_Bahan: primaryId,
         Nama_Bahan: item.name,
         Rumus_Kimia: item.brandOrSpec || '-',
         Bentuk_Wujud: 'Cair / Padat',
@@ -503,7 +598,8 @@ export const mapItemToGasPayload = (
   return {
     targetSheet: 'Alat',
     row: {
-      ID_Barang: item.code || item.id,
+      id: primaryId,
+      ID_Barang: primaryId,
       Nama_Alat: item.name,
       Kategori: item.category,
       Sub_Lab: item.primaryLab || 'SEMUA_LAB',
@@ -513,6 +609,7 @@ export const mapItemToGasPayload = (
       Kondisi_Rusak_Berat: Number(item.conditionHeavyDamage ?? 0),
       Lokasi_Penyimpanan: item.storageRack || '-',
       Spesifikasi_Merek: item.brandOrSpec || '-',
+      Status_Kalibrasi: item.calibrationStatus || 'Bagus',
     },
   };
 };
@@ -789,13 +886,18 @@ export const mapGasRowToActivity = (
  * Map UserAccount to Pengguna row in Google Sheets
  */
 export const mapUserToGasPayload = (user: UserAccount): Record<string, any> => {
+  const userId = String(user.id || user.schoolIdNumber || (user.email ? `USR-${user.email.split('@')[0]}` : 'USR-1')).trim();
   return {
-    ID_Pengguna: user.id || user.schoolIdNumber || 'USR',
+    id: userId,
+    ID_Pengguna: userId,
     Nama_Lengkap: user.name,
     Email_Petugas: user.email,
     Kata_Sandi: user.password || 'labarcss2026',
     Role: user.role,
     Unit_Tugas: user.assignedLab || 'ALL',
+    NIP_ID: user.nip || user.schoolIdNumber || '-',
+    Avatar_URL: user.avatarUrl || '',
+    Status: user.status || 'aktif',
   };
 };
 

@@ -773,14 +773,18 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ onClose, onSubmit }) => {
   const [status, setStatus] = useState<'aktif' | 'nonaktif'>('aktif');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     if (!name.trim() || !email.trim()) {
       setErrorMsg('Nama lengkap dan email resmi wajib diisi!');
       return;
     }
     setErrorMsg(null);
+    setIsSubmitting(true);
 
     onSubmit({
       name: name.trim(),
@@ -961,15 +965,17 @@ const AddUserModal: React.FC<AddUserModalProps> = ({ onClose, onSubmit }) => {
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl transition-colors"
+              disabled={isSubmitting}
+              className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl transition-colors disabled:opacity-50"
             >
               Batal
             </button>
             <button
               type="submit"
-              className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold rounded-xl shadow-xs transition-colors"
+              disabled={isSubmitting}
+              className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:bg-emerald-700/60 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
             >
-              Daftarkan Akun
+              {isSubmitting ? 'Mendaftarkan Akun...' : 'Daftarkan Akun'}
             </button>
           </div>
         </form>
@@ -1000,15 +1006,19 @@ const EditUserModal: React.FC<EditUserModalProps> = ({ user, onClose, onSubmit }
   const [assignedLab, setAssignedLab] = useState<LabId | 'ALL'>(user.assignedLab);
   const [status, setStatus] = useState<'aktif' | 'nonaktif'>(user.status || 'aktif');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmitting) return;
+
     if (!name.trim() || !email.trim()) {
       setErrorMsg('Nama lengkap dan email tidak boleh kosong!');
       return;
     }
     setErrorMsg(null);
+    setIsSubmitting(true);
 
     onSubmit({
       name: name.trim(),
@@ -1240,15 +1250,17 @@ const EditUserModal: React.FC<EditUserModalProps> = ({ user, onClose, onSubmit }
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl transition-colors"
+              disabled={isSubmitting}
+              className="px-4 py-2 border border-slate-200 hover:bg-slate-50 text-slate-700 font-semibold rounded-xl transition-colors disabled:opacity-50"
             >
               Batal
             </button>
             <button
               type="submit"
-              className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold rounded-xl shadow-xs transition-colors"
+              disabled={isSubmitting}
+              className="px-5 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:bg-emerald-700/60 text-white font-bold rounded-xl shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
             >
-              Simpan Perubahan
+              {isSubmitting ? 'Menyimpan...' : 'Simpan Perubahan'}
             </button>
           </div>
         </form>

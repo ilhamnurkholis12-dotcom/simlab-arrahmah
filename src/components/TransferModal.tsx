@@ -24,8 +24,11 @@ export const TransferModal: React.FC<TransferModalProps> = ({
   const [notes, setNotes] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string>('');
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   useEffect(() => {
     if (isOpen) {
+      setIsSubmitting(false);
       if (selectedItem) {
         setItemId(selectedItem.id);
         // Default source lab to one with positive stock
@@ -56,6 +59,8 @@ export const TransferModal: React.FC<TransferModalProps> = ({
     e.preventDefault();
     setErrorMsg('');
 
+    if (isSubmitting) return;
+
     if (!itemId) {
       const msg = 'Pilih barang yang akan ditransfer.';
       setErrorMsg(msg);
@@ -81,6 +86,8 @@ export const TransferModal: React.FC<TransferModalProps> = ({
       return;
     }
 
+    setIsSubmitting(true);
+
     const res = transferStock(
       itemId,
       fromLab,
@@ -93,6 +100,7 @@ export const TransferModal: React.FC<TransferModalProps> = ({
     if (res.success) {
       onClose();
     } else {
+      setIsSubmitting(false);
       setErrorMsg(res.message);
     }
   };
@@ -247,15 +255,17 @@ export const TransferModal: React.FC<TransferModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="min-h-[44px] px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors"
+              disabled={isSubmitting}
+              className="min-h-[44px] px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium transition-colors disabled:opacity-50"
             >
               Batal
             </button>
             <button
               type="submit"
-              className="min-h-[44px] px-5 py-2 bg-sky-800 hover:bg-sky-900 text-white font-bold rounded-lg transition-colors shadow-xs"
+              disabled={isSubmitting}
+              className="min-h-[44px] px-5 py-2 bg-sky-800 hover:bg-sky-900 disabled:bg-sky-700/60 text-white font-bold rounded-lg transition-colors shadow-xs cursor-pointer disabled:cursor-not-allowed"
             >
-              Proses Transfer Antar Lab
+              {isSubmitting ? 'Memproses Transfer...' : 'Proses Transfer Antar Lab'}
             </button>
           </div>
         </form>

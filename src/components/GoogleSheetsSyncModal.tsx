@@ -288,73 +288,110 @@ export const GoogleSheetsSyncModal: React.FC<GoogleSheetsSyncModalProps> = ({
   const mapItemToGasRow = (sheetName: GasSheetName, item: any): Record<string, any> => {
     switch (sheetName) {
       case 'Stok_Alat':
+      case 'Alat':
         return {
+          id: item.code || item.id,
           ID_Barang: item.code || item.id,
           Nama_Alat: item.name,
           Kategori: item.category,
+          Sub_Lab: item.primaryLab || 'ALL',
           Jumlah_Stok: item.currentTotalStock ?? item.stok ?? 0,
-          Kondisi: (item.conditionGood ?? 0) > 0 ? 'Baik' : 'Perlu Perbaikan',
+          Kondisi_Baik: item.conditionGood ?? item.currentTotalStock ?? 0,
+          Kondisi_Rusak_Ringan: item.conditionLightDamage ?? 0,
+          Kondisi_Rusak_Berat: item.conditionHeavyDamage ?? 0,
           Lokasi_Penyimpanan: item.storageRack || '-',
+          Spesifikasi_Merek: item.brandOrSpec || '-',
+          Status_Kalibrasi: item.calibrationStatus || 'Bagus',
         };
       case 'Bahan_Kimia':
+      case 'Bahan':
         return {
+          id: item.code || item.id,
           ID_Bahan: item.code || item.id,
           Nama_Bahan: item.name,
           Rumus_Kimia: item.brandOrSpec || '-',
-          Jumlah_Stok: item.currentTotalStock ?? item.stok ?? 0,
+          Bentuk_Wujud: 'Cair / Padat',
+          Stok_Tersedia: item.currentTotalStock ?? item.stok ?? 0,
           Satuan: item.unit || 'Botol',
+          Batas_Minimum: item.minStockAlert ?? 5,
+          Lokasi_Penyimpanan: item.storageRack || 'Lemari Bahan Kimia',
+          Tanggal_Kadaluarsa: item.expiredDate || '2028-12-31',
+          Klasifikasi_Bahaya: item.notes || 'Bahan Laboratorium',
         };
       case 'Peminjaman_Alat':
+      case 'Peminjaman':
         return {
-          ID_Peminjaman: item.id || `PINJ-${Date.now()}`,
-          ID_Barang: item.itemId || item.itemCode || '-',
-          Nama_Peminjam: item.borrowerName || '-',
-          Kelas_Unit: item.borrowerClass || '-',
+          id: item.code || item.id,
+          ID_Pinjam: item.code || item.id,
+          Peminjam_Nama: item.borrowerName || '-',
+          Kelas_Rombel: item.borrowerClassOrDept || item.borrowerClass || '-',
+          Kontak_WA: '-',
+          Nama_Barang: item.itemName || '-',
           Jumlah: item.quantity || 1,
-          Tanggal_Pinjam: item.borrowDate || '-',
-          Batas_Kembali: item.dueDate || '-',
-          Status: item.status || 'Dipinjam',
+          Tgl_Pinjam: item.borrowDate || '-',
+          Tgl_Batas_Kembali: item.expectedReturnDate || item.dueDate || '-',
+          Tgl_Realisasi_Kembali: item.actualReturnDate || '',
+          Status: item.status === 'KEMBALI_BAIK' || item.status === 'KEMBALI_RUSAK_PECAH' ? 'SUDAH_KEMBALI' : 'DIPINJAM',
+          Petugas_PIC: item.picOfficer || 'Petugas Lab',
+          Kondisi_Kembali: item.returnedCondition || (item.status === 'DIPINJAM' ? '-' : 'Baik & Lengkap'),
+          Laporan_Kerusakan: item.damageIncidentReport || '-',
         };
       case 'Jurnal_Praktikum': {
         const matchedClass = classes.find((c) => c.id === item.kelas_id);
+        const jrnId = `JRN-${item.id}`;
         return {
-          ID_Jurnal: `JRN-${item.id}`,
-          Tanggal: item.tanggal_kegiatan,
-          Kelas: matchedClass?.nama_kelas || `Kelas #${item.kelas_id}`,
-          Materi_Praktikum: item.judul_percobaan,
+          id: jrnId,
+          ID_Jurnal: jrnId,
+          Tanggal_Praktikum: item.tanggal_kegiatan,
           Guru_Pengampu: item.nama_guru || '-',
+          Mata_Pelajaran: item.laboratorium || 'IPA Terpadu',
+          Kelas_Rombel: matchedClass?.nama_kelas || `Kelas #${item.kelas_id}`,
+          Judul_Materi_Praktikum: item.judul_percobaan,
+          Sub_Lab: item.laboratorium || 'FISIKA',
+          Jumlah_Siswa_Hadir: item.jumlah_hadir || 25,
+          Jumlah_Siswa_Absen: item.jumlah_absen || 0,
+          Catatan_Insiden_Limbah: item.catatan_kejadian || '-',
         };
       }
       case 'Pengguna':
         return {
-          ID_Pengguna: item.id || item.schoolIdNumber || 'USR',
+          id: item.id || item.schoolIdNumber || (item.email ? `USR-${item.email.split('@')[0]}` : 'USR-1'),
+          ID_Pengguna: item.id || item.schoolIdNumber || (item.email ? `USR-${item.email.split('@')[0]}` : 'USR-1'),
           Nama_Lengkap: item.name,
           Email_Petugas: item.email,
           Kata_Sandi: item.password || 'labarcss2026',
           Role: item.role,
           Unit_Tugas: item.assignedLab || 'ALL',
+          NIP_ID: item.nip || item.schoolIdNumber || '-',
+          Avatar_URL: item.avatarUrl || '',
+          Status: item.status || 'aktif',
         };
       case 'Data_Siswa': {
         const studentClass = classes.find((c) => c.id === item.kelas_id);
+        const nisnVal = item.nisn || `007${String(item.id).padStart(7, '0')}`;
         return {
-          ID_Siswa: String(item.id),
-          NISN: item.nisn || '-',
-          Nama_Siswa: item.nama_siswa,
-          Kelas: studentClass?.nama_kelas || '-',
-          Status: item.status || 'Aktif',
+          id: nisnVal,
+          NISN: nisnVal,
+          Nama_Lengkap_Santri: item.nama_siswa,
+          Tingkat_Sekolah: item.unit || 'SMA',
+          Kelas_Rombel: studentClass?.nama_kelas || '-',
+          Jenis_Kelamin: item.gender || 'Laki-laki',
+          Status_Keaktifan: item.status || 'Aktif',
         };
       }
       case 'E_Rapot':
       case 'E_Raport':
         return {
+          id: item.id || `RAP-${Date.now()}`,
           ID_Nilai: item.id || `RAP-${Date.now()}`,
           NISN: item.nisn || '-',
+          Nama_Santri: item.nama_santri || item.nama || 'Santri',
           Mata_Pelajaran: item.mapel || 'IPA Terpadu',
-          Semester: 'Genap',
-          Tahun_Ajaran: '2025/2026',
-          Nilai_Praktikum: item.nilai_praktikum ?? item.nilai ?? 85,
-          Nilai_Sikap_Lab: item.nilai_sikap ?? 'A',
-          Predikat: item.predikat ?? 'Sangat Baik',
+          Materi_Praktikum: item.materi || 'Eksperimen Lab',
+          Nilai_Keterampilan_Psikomotorik: item.nilai_praktikum ?? item.nilai ?? 85,
+          Nilai_Laporan_Analisis: item.nilai_laporan ?? 85,
+          Predikat_Sikap_K3: item.nilai_sikap ?? 'A',
+          Guru_Penilai: item.guru || 'Guru Laboran',
         };
       default:
         return item;

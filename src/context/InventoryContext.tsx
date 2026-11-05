@@ -2654,9 +2654,11 @@ export const InventoryProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       (itemData.distribution.SMP_TERPADU || 0);
 
     const initial = itemData.initialStock2026 || totalDist;
+    const finalId = (itemData.code && itemData.code.trim()) || `ALT-${Date.now()}`;
     const newItem: InventoryItem = {
       ...itemData,
-      id: `item-${Date.now()}`,
+      id: finalId,
+      code: (itemData.code && itemData.code.trim()) || finalId,
       initialStock2026: initial,
       totalIn: 0,
       totalOut: 0,

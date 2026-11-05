@@ -44,8 +44,11 @@ export const ItemModal: React.FC<ItemModalProps> = ({
 
   const totalCalculated = distFisika + distKimia + distBiologi + distSmp;
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   useEffect(() => {
     if (isOpen) {
+      setIsSubmitting(false);
       if (editingItem) {
         setCode(editingItem.code);
         setName(editingItem.name);
@@ -100,10 +103,15 @@ export const ItemModal: React.FC<ItemModalProps> = ({
     e.preventDefault();
     setErrorMsg('');
 
+    // Cegah double-click atau multi-submit simultan
+    if (isSubmitting) return;
+
     if (!code.trim() || !name.trim()) {
       setErrorMsg('Kode inventaris dan nama barang wajib diisi.');
       return;
     }
+
+    setIsSubmitting(true);
 
     const distribution = {
       FISIKA: distFisika,
@@ -130,6 +138,11 @@ export const ItemModal: React.FC<ItemModalProps> = ({
         conditionLightDamage: condLight,
         conditionHeavyDamage: condHeavy,
       });
+      showToast({
+        type: 'success',
+        title: 'Data Barang Diperbarui',
+        message: `Data inventaris "${name.trim()}" (${code.trim()}) berhasil diperbarui.`,
+      });
     } else {
       addItem({
         code: code.trim(),
@@ -153,14 +166,6 @@ export const ItemModal: React.FC<ItemModalProps> = ({
         type: 'success',
         title: 'Barang Inventaris Ditambahkan',
         message: `Item "${name.trim()}" (${code.trim()}) berhasil didaftarkan ke inventaris.`,
-      });
-    }
-
-    if (editingItem) {
-      showToast({
-        type: 'success',
-        title: 'Data Barang Diperbarui',
-        message: `Data inventaris "${name.trim()}" (${code.trim()}) berhasil diperbarui.`,
       });
     }
 
@@ -501,16 +506,24 @@ export const ItemModal: React.FC<ItemModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="min-h-[44px] px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium text-xs transition-colors"
+                disabled={isSubmitting}
+                className="min-h-[44px] px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg font-medium text-xs transition-colors disabled:opacity-50"
               >
                 Batal
               </button>
               <button
                 type="submit"
-                className="min-h-[44px] px-5 py-2 bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-xs"
+                disabled={isSubmitting}
+                className="min-h-[44px] px-5 py-2 bg-emerald-800 hover:bg-emerald-900 disabled:bg-emerald-700/60 text-white font-bold text-xs rounded-lg transition-colors flex items-center gap-1.5 shadow-xs cursor-pointer disabled:cursor-not-allowed"
               >
-                <Save className="w-4 h-4" />
-                <span>{editingItem ? 'Simpan Perubahan' : 'Tambahkan ke Inventaris'}</span>
+                <Save className={`w-4 h-4 ${isSubmitting ? 'animate-spin' : ''}`} />
+                <span>
+                  {isSubmitting
+                    ? 'Menyimpan...'
+                    : editingItem
+                    ? 'Simpan Perubahan'
+                    : 'Tambahkan ke Inventaris'}
+                </span>
               </button>
             </div>
           </div>
